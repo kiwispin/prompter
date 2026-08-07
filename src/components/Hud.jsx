@@ -10,7 +10,7 @@ const VOICE_LABELS = {
   error: 'Mic error',
 }
 
-export default function Hud({ stats, phase, settings, voiceStatus, lastTranscript, totalWords, running }) {
+export default function Hud({ stats, phase, settings, voiceStatus, lastTranscript, totalWords, running, hasKey }) {
   if (!settings.showHud) return null
   const pct = Math.round(stats.progress * 100)
 
@@ -27,7 +27,9 @@ export default function Hud({ stats, phase, settings, voiceStatus, lastTranscrip
     settings.mode === 'voice' && settings.source === 'mic' ? (
       <span className={`chip ${chipClass}`}>{VOICE_LABELS[voiceStatus] || VOICE_LABELS.off}</span>
     ) : settings.mode === 'voice' ? (
-      <span className="chip chip-demo">Demo reader</span>
+      <span className="chip chip-paused">
+        {hasKey ? 'Demo — switch Source to Mic' : 'Demo reader'}
+      </span>
     ) : (
       <span className="chip chip-const">Speed scroll</span>
     )

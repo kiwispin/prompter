@@ -43,6 +43,13 @@ export default function App() {
     setTimeout(() => prompter.start(), 120)
   }, [dismissOnboarding, prompter, setSetting])
 
+  // After saving a key, go straight to microphone tracking.
+  const useMicrophone = useCallback(() => {
+    setSetting('mode', 'voice')
+    setSetting('source', 'mic')
+    dismissOnboarding()
+  }, [dismissOnboarding, setSetting])
+
   // Error toast
   useEffect(() => {
     if (!prompter.error) return
@@ -132,6 +139,7 @@ export default function App() {
             lastTranscript={prompter.lastTranscript}
             totalWords={prompter.doc.totalWords}
             running={running}
+            hasKey={Boolean(speechmaticsKey)}
           />
         </>
       )}
@@ -180,6 +188,7 @@ export default function App() {
           saveSpeechmaticsKey={saveSpeechmaticsKey}
           onDone={dismissOnboarding}
           onWatchDemo={watchDemo}
+          onSaveKey={useMicrophone}
         />
       )}
 

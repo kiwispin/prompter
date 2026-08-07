@@ -1,13 +1,13 @@
 import { useState } from 'react'
 
-export default function Onboarding({ speechmaticsKey, saveSpeechmaticsKey, onDone, onWatchDemo }) {
+export default function Onboarding({ speechmaticsKey, saveSpeechmaticsKey, onDone, onWatchDemo, onSaveKey }) {
   const [step, setStep] = useState(0)
   const [draft, setDraft] = useState(speechmaticsKey || '')
 
   const finish = (demo) => {
     saveSpeechmaticsKey(draft)
     if (demo) onWatchDemo()
-    else onDone()
+    else onSaveKey()
   }
 
   return (
@@ -50,8 +50,8 @@ export default function Onboarding({ speechmaticsKey, saveSpeechmaticsKey, onDon
               autoFocus
             />
             <div className="onboard-actions">
-              <button className="btn btn-primary btn-lg" onClick={() => finish(true)} disabled={!draft.trim()}>
-                Save &amp; continue
+              <button className="btn btn-primary btn-lg" onClick={() => finish(false)} disabled={!draft.trim()}>
+                Save &amp; use microphone
               </button>
               <button className="btn btn-ghost btn-lg" onClick={() => setStep(0)}>
                 Back
