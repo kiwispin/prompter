@@ -3,6 +3,7 @@ import { load, save, remove, KEYS } from '../lib/storage'
 import { TOKEN_PROXY_URL } from '../config'
 
 export const DEFAULT_SETTINGS = {
+  uiVersion: 2,
   mode: 'voice', // 'constant' | 'voice'
   source: 'demo', // 'demo' | 'mic'
   baselineWpm: 150,
@@ -18,7 +19,7 @@ export const DEFAULT_SETTINGS = {
   fontFamily: 'sans', // 'sans' | 'serif' | 'mono'
   mirror: false,
   mirrorAxis: 'none', // 'none' | 'h' | 'v' | 'both'
-  eyeline: 'none', // 'none' | 'arrow' | 'line' | 'band'
+  eyeline: 'line', // 'none' | 'arrow' | 'line' | 'band'
   showHud: true,
   showCues: true,
   countdownOnStart: true,
@@ -33,6 +34,10 @@ function migrate(stored) {
   }
   if (!Number.isFinite(s.eyelinePercent)) {
     s.eyelinePercent = { top: 18, center: 50, bottom: 85 }[s.readingPos] ?? DEFAULT_SETTINGS.eyelinePercent
+  }
+  if (!s.uiVersion || s.uiVersion < 2) {
+    if (!s.eyeline || s.eyeline === 'none') s.eyeline = 'line'
+    s.uiVersion = 2
   }
   return s
 }

@@ -15,6 +15,7 @@ export default function Toolbar({
   mode,
   source,
 }) {
+  const engaged = running || phase === PHASE.CONNECTING || phase === PHASE.COUNTDOWN
   const voiceLabel = {
     off: 'Mic off',
     starting: 'Starting mic...',
@@ -34,17 +35,19 @@ export default function Toolbar({
           : 'chip-off'
 
   return (
-    <div className="toolbar">
-      <div className="toolbar-left">
-        <ToolbarButton icon={running ? 'pause' : 'play'} label={running ? 'Pause' : 'Play'} title="Play/Pause (Space)" onClick={onToggle} />
-        <ToolbarButton icon="restart" label="Restart" title="Restart (R)" onClick={onRestart} />
-        <span className="toolbar-divider" />
-        <ToolbarButton icon="back" label="Back" title="Back a few words (Arrow Up)" onClick={() => onNudge(-3)} />
-        <ToolbarButton icon="forward" label="Skip" title="Skip a few words (Arrow Down)" onClick={() => onNudge(3)} />
+    <header className="toolbar">
+      <div className="toolbar-identity">
+        <span className="toolbar-mark" aria-hidden="true">
+          <span />
+        </span>
+        <span className="toolbar-brand">
+          <strong>Prompter</strong>
+          <small>{mode === 'voice' && source === 'mic' ? 'Voice reader' : mode === 'voice' ? 'Demo reader' : 'Speed reader'}</small>
+        </span>
+        <span className="toolbar-title">{activeName}</span>
       </div>
 
-      <div className="toolbar-center">
-        <span className="toolbar-title">{activeName}</span>
+      <div className="toolbar-actions">
         {mode === 'voice' && source === 'mic' && (
           <span className={`chip chip-sm toolbar-voice-chip ${voiceClass}`} aria-live="polite">
             {voiceLabel}
@@ -52,20 +55,24 @@ export default function Toolbar({
         )}
         {phase === PHASE.PAUSED && <span className="chip chip-sm chip-paused">Paused</span>}
         {phase === PHASE.ENDED && <span className="chip chip-sm chip-paused">Finished</span>}
-      </div>
-
-      <div className="toolbar-right">
-        <ToolbarButton icon="fullscreen" label="Fullscreen" title="Fullscreen (F)" onClick={onToggleFullscreen} />
         <ToolbarButton icon="script" label="Scripts" title="Scripts" onClick={onOpenScripts} />
+        <ToolbarButton icon="back" label="Back" title="Back a few words (Arrow Up)" onClick={() => onNudge(-3)} />
+        <ToolbarButton icon="forward" label="Skip" title="Skip a few words (Arrow Down)" onClick={() => onNudge(3)} />
+        <ToolbarButton icon="restart" label="Restart" title="Restart (R)" onClick={onRestart} />
+        <ToolbarButton icon="fullscreen" label="Fullscreen" title="Fullscreen (F)" onClick={onToggleFullscreen} />
         <ToolbarButton icon="gear" label="Settings" title="Settings (S)" onClick={onOpenSettings} />
+        <button className={`toolbar-primary${engaged ? ' toolbar-primary-live' : ''}`} onClick={onToggle} title="Start/Stop (Space)">
+          <Icon name={engaged ? 'pause' : 'play'} />
+          <span>{engaged ? 'Stop' : 'Start'}</span>
+        </button>
       </div>
-    </div>
+    </header>
   )
 }
 
 function ToolbarButton({ icon, label, title, onClick }) {
   return (
-    <button className="iconbtn toolbar-btn" onClick={onClick} title={title} aria-label={label}>
+    <button className={`iconbtn toolbar-btn toolbar-btn-${icon}`} onClick={onClick} title={title} aria-label={label}>
       <Icon name={icon} />
       <span className="toolbar-btn-label">{label}</span>
     </button>

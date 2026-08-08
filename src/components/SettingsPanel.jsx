@@ -110,7 +110,7 @@ export default function SettingsPanel({ settings, setSetting, resetSettings, spe
             ? 'No tracking highlight — the script just stays put until you speak.'
             : settings.matching === 'word'
               ? 'Tracks each spoken word for the tightest cursor.'
-              : 'Advances a whole line at a time — steadier for fast delivery.'}
+              : 'Highlights the current sentence while spoken words still control the scroll.'}
         </div>
         {settings.mode === 'voice' && settings.source === 'mic' && (
           <Toggle

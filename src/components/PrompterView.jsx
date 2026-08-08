@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { LINE_CUE, LINE_HEADING, LINE_TEXT } from '../lib/parser'
 
 const EYELINE_PRESETS = { top: 0.18, center: 0.5, bottom: 0.85 }
 const FONT_STACK = {
-  sans: "'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif",
+  sans: "'Inter Tight', 'Arial Narrow', 'Segoe UI', sans-serif",
   mono: "'SFMono-Regular', Consolas, 'Roboto Mono', monospace",
   serif: "Georgia, 'Times New Roman', serif",
 }
@@ -11,14 +11,13 @@ const FONT_STACK = {
 export default function PrompterView({ doc, word, positionRef, totalWords, mode, settings, onManualScroll, running }) {
   const stageRef = useRef(null)
   const linesRef = useRef(null)
-  const [activeLine, setActiveLine] = useState(-1)
   const manualRef = useRef(null)
   const dragRef = useRef(null)
   const clickSuppressionRef = useRef(false)
   const offsetRef = useRef(null)
   const momentumRef = useRef({ v: 0, running: false })
   const previousIndexRef = useRef(-1)
-  const geometryRef = useRef({ rows: [], wordToRow: new Map(), pxPerWord: 4 })
+  const geometryRef = useRef({ rows: [], wordToRow: new Map() })
 
   const { fontSize, lineHeight, sideMargins, fontFamily, matching } = settings
   const eyelineFraction = useMemo(() => {
@@ -28,12 +27,10 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     return EYELINE_PRESETS[settings.readingPos] ?? EYELINE_PRESETS.center
   }, [settings.eyelinePercent, settings.readingPos])
 
-  const activeLineId = useMemo(() => {
+  const activeSentenceId = useMemo(() => {
     if (word < 0) return -1
-    return doc.wordLine.get(word) ?? -1
+    return doc.wordSentence.get(word) ?? -1
   }, [doc, word])
-
-  useEffect(() => setActiveLine(activeLineId), [activeLineId])
 
   const highlightEnabled = mode !== 'constant' && matching !== 'none'
 
@@ -63,6 +60,27 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     [clampOffset, eyelineFraction],
   )
 
+  const targetForPosition = useCallback(
+    (position) => {
+      const stage = stageRef.current
+      const geometry = geometryRef.current
+      if (!stage || !geometry.rows.length || position < 0) return 0
+
+      const index = Math.max(0, Math.min(totalWords - 1, Math.floor(position)))
+      const rowIndex = geometry.wordToRow.get(index)
+      const row = rowIndex == null ? null : geometry.rows[rowIndex]
+      if (!row) return targetForIndex(index)
+
+      const next = geometry.rows[rowIndex + 1]
+      const wordCount = Math.max(1, row.endIndex - row.startIndex + 1)
+      const progress = Math.max(0, Math.min(1, (position - row.startIndex) / wordCount))
+      const nextCenter = next?.center ?? row.center + (row.bottom - row.top)
+      const contentCenter = row.center + (nextCenter - row.center) * progress
+      return clampOffset(stage.clientHeight * eyelineFraction - contentCenter)
+    },
+    [clampOffset, eyelineFraction, targetForIndex, totalWords],
+  )
+
   const measureGeometry = useCallback(() => {
     const holder = linesRef.current
     if (!holder) return
@@ -78,7 +96,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       let row = rows[rows.length - 1]
 
       if (!row || Math.abs(row.top - top) > 1) {
-        row = { top, bottom, startIndex: index, endIndex: index, center: 0, pxPerWord: 4 }
+        row = { top, bottom, startIndex: index, endIndex: index, center: 0 }
         rows.push(row)
       } else {
         row.bottom = Math.max(row.bottom, bottom)
@@ -89,17 +107,10 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       rowMap.set(index, rows.length - 1)
     }
 
-    for (let i = 0; i < rows.length; i += 1) {
-      const next = rows[i + 1]
-      const count = Math.max(1, rows[i].endIndex - rows[i].startIndex + 1)
-      rows[i].pxPerWord = next ? Math.max(1, (next.top - rows[i].top) / count) : Math.max(1, rows[i].bottom - rows[i].top)
-    }
-
     const current = currentIndex()
     geometryRef.current = {
       rows,
       wordToRow: rowMap,
-      pxPerWord: rows[rowMap.get(current)]?.pxPerWord || 4,
     }
 
     // Re-anchor immediately after a layout change. The next voice update will
@@ -110,6 +121,9 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
 
   useLayoutEffect(() => {
     let frame
+    offsetRef.current = null
+    previousIndexRef.current = -1
+    geometryRef.current = { rows: [], wordToRow: new Map() }
     const schedule = () => {
       cancelAnimationFrame(frame)
       frame = requestAnimationFrame(measureGeometry)
@@ -128,13 +142,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       cancelAnimationFrame(frame)
       observer?.disconnect()
     }
-  }, [doc, fontSize, lineHeight, sideMargins, fontFamily, measureGeometry])
-
-  useEffect(() => {
-    offsetRef.current = null
-    previousIndexRef.current = -1
-    geometryRef.current = { rows: [], wordToRow: new Map(), pxPerWord: 4 }
-  }, [doc, mode, eyelineFraction])
+  }, [doc, fontSize, lineHeight, sideMargins, fontFamily, mode, eyelineFraction, measureGeometry])
 
   const wordAtReadingLine = useCallback(() => {
     const stage = stageRef.current
@@ -248,10 +256,12 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
         clickSuppressionRef.current = false
         return
       }
-      const start = Number(event.currentTarget.dataset.startIndex)
+      const sentenceId = Number(event.target.closest?.('[data-sentence]')?.dataset.sentence)
+      const sentence = Number.isFinite(sentenceId) ? doc.sentences.find((item) => item.id === sentenceId) : null
+      const start = sentence?.startIndex ?? Number(event.currentTarget.dataset.startIndex)
       if (Number.isFinite(start) && start >= 0) onManualScroll?.(start)
     },
-    [onManualScroll],
+    [doc, onManualScroll],
   )
 
   useEffect(() => {
@@ -266,6 +276,9 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       last = now
 
       if (stage && holder) {
+        // The prompter owns movement through transforms. Prevent focus or
+        // automation scrollIntoView calls from introducing a second offset.
+        if (stage.scrollTop !== 0) stage.scrollTop = 0
         const momentum = momentumRef.current
         if (momentum.running) {
           momentum.v *= Math.pow(0.93, dt * 60)
@@ -285,11 +298,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
           previousIndexRef.current = index
 
           if (mode === 'constant') {
-            if (offsetRef.current == null) offsetRef.current = targetForIndex(index)
-            const pxPerWord = geometryRef.current.pxPerWord || 4
-            if (running && settings.baselineWpm > 0) {
-              offsetRef.current -= (settings.baselineWpm / 60) * pxPerWord * dt
-            }
+            offsetRef.current = targetForPosition(positionRef.current)
           } else {
             if (offsetRef.current == null) offsetRef.current = targetForIndex(index)
             const target = targetForIndex(index)
@@ -310,7 +319,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
 
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
-  }, [clampOffset, currentIndex, mode, running, settings.baselineWpm, syncAfterManual, targetForIndex])
+  }, [clampOffset, currentIndex, mode, positionRef, syncAfterManual, targetForIndex, targetForPosition])
 
   const mirrorStyle = useMemo(() => {
     if (!settings.mirror) return {}
@@ -331,11 +340,6 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     '--bottom-space': `${Math.max(12, (1 - eyelineFraction) * 100)}vh`,
   }
 
-  const isLineHighlighted = useCallback(
-    (line) => highlightEnabled && matching === 'line' && line.type === LINE_TEXT && line.id === activeLine,
-    [activeLine, highlightEnabled, matching],
-  )
-
   return (
     <div
       ref={stageRef}
@@ -350,23 +354,24 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       <div className="prompter-mirror" style={mirrorStyle}>
         <div className="prompter-lines" ref={linesRef} style={linesStyle}>
           {doc.lines.map((line, lineIndex) => {
-            const lineActive = isLineHighlighted(line)
             return (
               <div
                 key={line.type === LINE_TEXT ? line.id : `line-${lineIndex}`}
                 data-line={line.type === LINE_TEXT ? line.id : undefined}
                 data-start-index={line.type === LINE_TEXT ? line.startIndex : undefined}
-                className={`pline pline-${line.type}${lineActive ? ' pline-active' : ''}`}
+                className={`pline pline-${line.type}`}
                 onClick={line.type === LINE_TEXT ? onLineClick : undefined}
               >
                 {line.type === LINE_TEXT ? (
                   line.parts.map((part, partIndex) =>
                     part.kind === 'cue' ? (
-                      <span key={`cue-${partIndex}`} className="pcue-inline">
-                        [{part.text}]
-                      </span>
+                      settings.showCues ? (
+                        <span key={`cue-${partIndex}`} className="pcue-inline">
+                          [{part.text}]
+                        </span>
+                      ) : null
                     ) : (
-                      renderTextPart(part, word, highlightEnabled, matching, `part-${partIndex}`)
+                      renderTextPart(part, word, activeSentenceId, highlightEnabled, matching, `part-${partIndex}`)
                     ),
                   )
                 ) : line.type === LINE_HEADING ? (
@@ -383,12 +388,12 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
           })}
         </div>
       </div>
-      <EyelineIndicator kind={settings.eyeline} fraction={eyelineFraction} />
+      <EyelineIndicator kind={settings.eyeline} fraction={eyelineFraction} running={running} />
     </div>
   )
 }
 
-function renderTextPart(part, currentWord, highlightEnabled, matching, keyPrefix) {
+function renderTextPart(part, currentWord, activeSentenceId, highlightEnabled, matching, keyPrefix) {
   const nodes = []
   let cursor = 0
 
@@ -399,12 +404,13 @@ function renderTextPart(part, currentWord, highlightEnabled, matching, keyPrefix
       'pword',
       highlightEnabled && word.index < currentWord ? 'pword-read' : '',
       highlightEnabled && matching === 'word' && word.index === currentWord ? 'pword-current' : '',
+      highlightEnabled && matching === 'line' && word.sentenceId === activeSentenceId ? 'pword-sentence-current' : '',
     ]
       .filter(Boolean)
       .join(' ')
 
     nodes.push(
-      <span key={word.index} data-wid={word.index} className={classes}>
+      <span key={word.index} data-wid={word.index} data-sentence={word.sentenceId} className={classes}>
         {part.text.slice(word.start, word.end)}
       </span>,
     )
@@ -421,7 +427,7 @@ function parseManual(holder) {
   return match ? parseFloat(match[1]) : 0
 }
 
-function EyelineIndicator({ kind, fraction }) {
+function EyelineIndicator({ kind, fraction, running }) {
   if (!kind || kind === 'none') return null
   const top = `${fraction * 100}%`
 
@@ -432,7 +438,14 @@ function EyelineIndicator({ kind, fraction }) {
       </div>
     )
   }
-  if (kind === 'line') return <div className="eyeline eyeline-line" style={{ top }} />
+  if (kind === 'line') {
+    return (
+      <div className={`eyeline eyeline-line${running ? ' eyeline-live' : ''}`} style={{ top }}>
+        <span className="eyeline-cap eyeline-cap-left" />
+        <span className="eyeline-cap eyeline-cap-right" />
+      </div>
+    )
+  }
   if (kind === 'band') return <div className="eyeline eyeline-band" style={{ top }} />
   return null
 }

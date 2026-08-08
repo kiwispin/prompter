@@ -28,7 +28,7 @@ export default function App() {
   const rootRef = useRef(null)
 
   const running = prompter.phase === PHASE.RUNNING
-  const busy = prompter.phase === PHASE.COUNTDOWN
+  const busy = prompter.phase === PHASE.COUNTDOWN || prompter.phase === PHASE.CONNECTING
 
   // Onboarding actions
   const dismissOnboarding = useCallback(() => {
@@ -67,7 +67,7 @@ export default function App() {
       if (k === ' ') {
         e.preventDefault()
         if (showOnboarding) return
-        if (prompter.phase === PHASE.RUNNING || prompter.phase === PHASE.COUNTDOWN) prompter.stop()
+        if ([PHASE.CONNECTING, PHASE.COUNTDOWN, PHASE.RUNNING].includes(prompter.phase)) prompter.stop()
         else prompter.start()
       } else if (k === 'r') {
         prompter.restart()

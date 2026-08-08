@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { parseScript } from '../src/lib/parser.js'
 import { matchTranscript, matchTranscriptDetailed, tokenize } from '../src/lib/matcher.js'
+import { calculateMeasuredWpm } from '../src/lib/stats.js'
 
 test('parser preserves punctuation while indexing words separately', () => {
   const doc = parseScript("Hello, world! Don't lose off-script cues.")
@@ -45,4 +46,18 @@ test('partial one-word matches do not move the cursor without final evidence', (
 
   assert.equal(matchTranscript(tokenize('hello'), script, 0), -1)
   assert.equal(matchTranscript(tokenize('hello'), script, 0, { final: true }), 0)
+})
+
+test('sentences expose stable start indexes for tap-to-jump', () => {
+  const doc = parseScript('First sentence here. Second sentence starts here!')
+
+  assert.deepEqual(doc.sentences, [
+    { id: 0, startIndex: 0, endIndex: 2 },
+    { id: 1, startIndex: 3, endIndex: 6 },
+  ])
+})
+
+test('measured WPM uses the manual-jump baseline instead of total script position', () => {
+  assert.equal(calculateMeasuredWpm(42, 12, 40, 10), 60)
+  assert.equal(calculateMeasuredWpm(40, 10.5, 40, 10), 0)
 })
