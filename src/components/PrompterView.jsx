@@ -139,7 +139,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
                   line.parts.map((part, pi) =>
                     part.kind === 'cue' ? (
                       <span key={`c${pi}`} className="pcue-inline">
-                        {part.text}
+                        [{part.text}]
                       </span>
                     ) : (
                       part.words.map((w) => (
@@ -163,8 +163,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
                 ) : line.type === LINE_CUE && settings.showCues ? (
                   line.cues.map((c, ci) => (
                     <span key={ci} className="pcue-text">
-                      {ci > 0 ? ' ' : ''}
-                      {c}
+                      {ci > 0 ? ' ' : ''}[{c}]
                     </span>
                   ))
                 ) : null}
