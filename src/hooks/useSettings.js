@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS = {
   mode: 'voice', // 'constant' | 'voice'
   source: 'demo', // 'demo' | 'mic'
   baselineWpm: 150,
-  autoLoop: true,
+  autoLoop: false,
   readingPos: 'center', // 'top' | 'center' | 'bottom'
   matching: 'word', // 'none' | 'word' | 'line'
   voiceCommands: true,
