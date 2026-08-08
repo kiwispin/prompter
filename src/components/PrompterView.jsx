@@ -21,8 +21,8 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   // by hand; the auto-scroll loop stands down until it's released.
   const manualRef = useRef(null)
   const dragRef = useRef(null)
-  const wheelTimerRef = useRef(null)
-  const wheelDeltaRef = useRef(0)
+  const wheelSettleRef = useRef(null)
+  const wheelTargetRef = useRef(null) // eased scroll target while wheeling
   // Authoritative scroll offset (px) shared by rate, mic and manual scrolling.
   const offsetRef = useRef(null)
   // Momentum (px/ms) after a manual flick.
@@ -94,6 +94,8 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     if (e.target && e.target.closest && e.target.closest('.toolbar, .hud, .panel, .onboard, .countdown')) return
     if (!e.isPrimary) return
     momentumRef.current.running = false
+    wheelTargetRef.current = null
+    if (wheelSettleRef.current) clearTimeout(wheelSettleRef.current)
     dragRef.current = {
       startY: e.clientY,
       prevY: e.clientY,
@@ -136,21 +138,19 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   const onWheel = useCallback(
     (e) => {
       const holder = linesRef.current
-      if (!holder) return
-      const current = parseManual(holder)
-      applyManual(current - e.deltaY)
-      wheelDeltaRef.current = e.deltaY
-      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
-      wheelTimerRef.current = setTimeout(() => {
-        const delta = wheelDeltaRef.current
-        if (Math.abs(delta) > 12) {
-          momentumRef.current = { v: -delta / 16, running: true }
-        } else {
-          syncAfterManual()
-        }
-      }, 120)
+      const stage = stageRef.current
+      if (!holder || !stage) return
+      if (momentumRef.current.running) momentumRef.current.running = false
+      let delta = e.deltaY
+      if (e.deltaMode === 1) delta *= 16
+      const base = manualRef.current != null ? manualRef.current : offsetRef.current
+      const target = clampOffset(holder, stage, (base != null ? base : 0) - delta * 0.5)
+      wheelTargetRef.current = target
+      if (manualRef.current == null) manualRef.current = base != null ? base : 0
+      if (wheelSettleRef.current) clearTimeout(wheelSettleRef.current)
+      wheelSettleRef.current = setTimeout(syncAfterManual, 220)
     },
-    [applyManual, syncAfterManual],
+    [clampOffset, syncAfterManual],
   )
 
   // Scroll loop.
@@ -189,6 +189,23 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
           if (Math.abs(m.v) < 0.04 || clamped !== next) {
             m.running = false
             syncAfterManual()
+          }
+          raf = requestAnimationFrame(step)
+          return
+        }
+
+        // Eased wheel scrolling: glide toward the target over ~180ms.
+        if (wheelTargetRef.current != null) {
+          const target = wheelTargetRef.current
+          const cur = manualRef.current != null ? manualRef.current : offsetRef.current
+          const e = 1 - Math.pow(0.0005, dt / 0.18)
+          let next = cur + (target - cur) * e
+          next = clamp(next)
+          manualRef.current = next
+          holder.style.transform = `translateY(${next}px)`
+          if (Math.abs(target - next) < 0.5) {
+            manualRef.current = target
+            wheelTargetRef.current = null
           }
           raf = requestAnimationFrame(step)
           return
@@ -261,7 +278,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
 
   useEffect(
     () => () => {
-      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
+      if (wheelSettleRef.current) clearTimeout(wheelSettleRef.current)
     },
     [],
   )
