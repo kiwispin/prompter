@@ -13,7 +13,7 @@ const FONT_STACK = {
   serif: "Georgia, 'Times New Roman', serif",
 }
 
-export default function PrompterView({ doc, word, positionRef, totalWords, mode, settings, onManualScroll }) {
+export default function PrompterView({ doc, word, positionRef, totalWords, mode, settings, onManualScroll, running }) {
   const stageRef = useRef(null)
   const linesRef = useRef(null)
   const [activeLine, setActiveLine] = useState(-1)
@@ -22,6 +22,11 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   const manualRef = useRef(null)
   const dragRef = useRef(null)
   const wheelTimerRef = useRef(null)
+  // Rate-driven scroll state (Speed/Demo modes).
+  const ratePosRef = useRef(null)
+  const rateRowKey = useRef(null)
+  const ratePxPerWord = useRef(4)
+  const prevIdxRef = useRef(-1)
 
   const { fontSize, lineHeight, sideMargins, fontFamily, matching } = settings
 
@@ -110,13 +115,16 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     [applyManual, syncAfterManual],
   )
 
-  // Scroll loop. Pins the line you're reading at the eyeline (reading
-  // position), interpolating between the current and next word rows so the
-  // text glides smoothly past it like a hardware prompter. Microphone mode
-  // eases between recognition bursts; demo/constant track exactly.
+  // Scroll loop.
+  //   Speed scroll + Demo reader -> continuous rate-driven scroll (like a
+  //   hardware prompter): the text glides up at a steady pixel rate derived
+  //   from the WPM, so motion is perfectly smooth with no row-by-row steps.
+  //   Microphone mode -> pins the word you're on at the reading line and
+  //   eases between recognition bursts.
   useEffect(() => {
     let raf
-    let current = 0
+    let last = performance.now()
+    let current = 0 // eased position (mic mode)
     const ease = 0.25
 
     const step = () => {
@@ -124,44 +132,75 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       const holder = linesRef.current
       if (stage && holder) {
         if (manualRef.current != null) {
-          // User has hold of the text; keep their position.
+          last = performance.now()
           raf = requestAnimationFrame(step)
           return
         }
+        const now = performance.now()
+        const dt = Math.min(0.1, (now - last) / 1000)
+        last = now
         const frac = EYELINE_FRACTION[settings.readingPos] ?? 0.5
         const eyeline = stage.clientHeight * frac
-        const pos = positionRef.current
-        const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(pos)))
-        let target = 0
-
-        const el0 = holder.querySelector(`[data-wid="${idx}"]`)
-        if (el0) {
-          let cy = el0.offsetTop + el0.offsetHeight / 2
-          const el1 = holder.querySelector(`[data-wid="${idx + 1}"]`)
-          if (el1) {
-            const c1 = el1.offsetTop + el1.offsetHeight / 2
-            cy += (pos - Math.floor(pos)) * (c1 - cy)
-          }
-          target = eyeline - cy
-        }
-
         const maxScroll = holder.scrollHeight - stage.clientHeight
-        target = Math.max(-maxScroll, Math.min(target, stage.clientHeight))
+        const clamp = (y) => Math.max(-maxScroll, Math.min(y, stage.clientHeight))
 
-        if (mode === 'voice' && settings.source === 'mic') {
+        const isRate = mode === 'constant' || (mode === 'voice' && settings.source === 'demo')
+
+        if (isRate) {
+          // Continuous rate-driven scroll.
+          const pos = positionRef.current
+          const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(pos)))
+          // Restart/nudge backwards: re-anchor to the pinned top of the word.
+          if (prevIdxRef.current > idx) ratePosRef.current = null
+          prevIdxRef.current = idx
+
+          const el0 = holder.querySelector(`[data-wid="${idx}"]`)
+          if (ratePosRef.current == null && el0) {
+            ratePosRef.current = eyeline - (el0.offsetTop + el0.offsetHeight / 2)
+          }
+
+          // Measure px-per-word for the current visual row (cached per row).
+          if (el0) {
+            const rowTop = el0.offsetTop
+            if (rateRowKey.current !== rowTop) {
+              rateRowKey.current = rowTop
+              ratePxPerWord.current = measureRowPxPerWord(holder, idx)
+            }
+          }
+
+          if (running && ratePxPerWord.current && settings.baselineWpm > 0) {
+            ratePosRef.current -= (settings.baselineWpm / 60) * ratePxPerWord.current * dt
+          }
+          if (ratePosRef.current != null) {
+            holder.style.transform = `translateY(${clamp(ratePosRef.current)}px)`
+          }
+        } else {
+          // Mic mode: pin the current word at the reading line.
+          const pos = positionRef.current
+          const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(pos)))
+          let target = 0
+          const el0 = holder.querySelector(`[data-wid="${idx}"]`)
+          if (el0) {
+            let cy = el0.offsetTop + el0.offsetHeight / 2
+            const el1 = holder.querySelector(`[data-wid="${idx + 1}"]`)
+            if (el1) {
+              const c1 = el1.offsetTop + el1.offsetHeight / 2
+              cy += (pos - Math.floor(pos)) * (c1 - cy)
+            }
+            target = eyeline - cy
+          }
+          target = clamp(target)
           current += (target - current) * ease
           if (Math.abs(target - current) < 0.5) current = target
-        } else {
-          current = target
+          holder.style.transform = `translateY(${clamp(current)}px)`
         }
-        current = Math.max(-maxScroll, Math.min(current, stage.clientHeight))
-        holder.style.transform = `translateY(${current}px)`
       }
       raf = requestAnimationFrame(step)
     }
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
-  }, [settings.readingPos, settings.source, doc, mode, positionRef, totalWords])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.readingPos, settings.source, doc, mode, positionRef, totalWords, running])
 
   // Force a re-measure pass when display settings change.
   useLayoutEffect(() => {
@@ -268,6 +307,33 @@ function parseManual(holder) {
   const t = holder.style.transform
   const m = t && /translateY\((-?[\d.]+)px\)/.exec(t)
   return m ? parseFloat(m[1]) : 0
+}
+
+// Pixels scrolled per word for the visual row containing word `idx`:
+// (distance to the next row) / (words on this row).
+function measureRowPxPerWord(holder, idx) {
+  const el0 = holder.querySelector(`[data-wid="${idx}"]`)
+  if (!el0) return 4
+  const rowTop = el0.offsetTop
+  // scan backward to the start of this row
+  let start = idx
+  while (start > 0) {
+    const p = holder.querySelector(`[data-wid="${start - 1}"]`)
+    if (!p || p.offsetTop !== rowTop) break
+    start--
+  }
+  // scan forward to the last word of this row
+  let end = idx
+  while (end < holder.querySelectorAll('[data-wid]').length - 1) {
+    const w = holder.querySelector(`[data-wid="${end}"]`)
+    const w2 = holder.querySelector(`[data-wid="${end + 1}"]`)
+    if (!w2 || w2.offsetTop !== w.offsetTop) break
+    end++
+  }
+  const next = holder.querySelector(`[data-wid="${end + 1}"]`)
+  if (!next) return 4
+  const words = end - start + 1
+  return words > 0 ? (next.offsetTop - rowTop) / words : 4
 }
 
 function EyelineIndicator({ kind, fraction }) {
