@@ -17,7 +17,6 @@ export default function App() {
     raw: scripts.active.text,
     settings,
     speechmaticsKey,
-    onSourceFallback: () => setSetting('source', 'demo'),
   })
 
   const [showSettings, setShowSettings] = useState(false)
@@ -150,6 +149,7 @@ export default function App() {
             onOpenTour={() => setShowOnboarding(true)}
             mirror={settings.mirror}
             hasVoiceConfig={Boolean(speechmaticsKey || settings.tokenProxyUrl)}
+            onUseVoice={useMicrophone}
             micStatus={prompter.micStatus}
             voiceStatus={prompter.voiceStatus}
             mode={settings.mode}

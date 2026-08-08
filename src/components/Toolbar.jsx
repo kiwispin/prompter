@@ -16,6 +16,7 @@ export default function Toolbar({
   mode,
   source,
   hasVoiceConfig,
+  onUseVoice,
 }) {
   const [showVoiceNudge, setShowVoiceNudge] = useState(true)
   const engaged = running || phase === PHASE.CONNECTING || phase === PHASE.COUNTDOWN
@@ -37,7 +38,7 @@ export default function Toolbar({
       <div className="toolbar-actions">
         {mode === 'voice' && source !== 'mic' && showVoiceNudge && (
           <span className="toolbar-nudge">
-            <button className="toolbar-nudge-main" onClick={onOpenSettings}>
+            <button className="toolbar-nudge-main" onClick={hasVoiceConfig ? onUseVoice : onOpenSettings}>
               <Icon name="sparkles" size={12} />
               {hasVoiceConfig ? 'Switch to your voice' : 'Add your key to use your voice'}
             </button>

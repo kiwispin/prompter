@@ -27,7 +27,7 @@ export default function Hud({ stats, phase, settings, voiceStatus, lastTranscrip
     settings.mode === 'voice' && settings.source === 'mic' ? (
       <span className={`chip chip-status ${chipClass}`}>{VOICE_LABELS[voiceStatus] || VOICE_LABELS.off}</span>
     ) : settings.mode === 'voice' ? (
-      <span className="chip chip-status chip-paused">{hasKey ? 'Demo — mic ready' : 'Demo reader'}</span>
+      <span className="chip chip-status chip-paused">{hasKey ? 'Demo reader — voice available' : 'Demo reader'}</span>
     ) : (
       <span className="chip chip-status chip-const">Speed scroll</span>
     )

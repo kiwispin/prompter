@@ -3,9 +3,9 @@ import { load, save, remove, KEYS } from '../lib/storage'
 import { TOKEN_PROXY_URL } from '../config'
 
 export const DEFAULT_SETTINGS = {
-  uiVersion: 2,
+  uiVersion: 3,
   mode: 'voice', // 'constant' | 'voice'
-  source: 'demo', // 'demo' | 'mic'
+  source: 'mic', // 'demo' | 'mic'
   baselineWpm: 150,
   autoLoop: false,
   readingPos: 'center', // 'top' | 'center' | 'bottom'
@@ -38,6 +38,13 @@ function migrate(stored) {
   if (!s.uiVersion || s.uiVersion < 2) {
     if (!s.eyeline || s.eyeline === 'none') s.eyeline = 'line'
     s.uiVersion = 2
+  }
+  if (s.uiVersion < 3) {
+    if ((s.tokenProxyUrl || TOKEN_PROXY_URL) && s.source === 'demo') {
+      s.mode = 'voice'
+      s.source = 'mic'
+    }
+    s.uiVersion = 3
   }
   return s
 }

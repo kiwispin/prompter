@@ -56,7 +56,9 @@ export default function SettingsPanel({ settings, setSetting, resetSettings, spe
             <div className="panel-hint">
               {settings.source === 'demo'
                 ? 'Simulates a reader at the baseline speed.'
-                : 'Follows your voice. Requires a Speechmatics key.'}
+                : settings.tokenProxyUrl
+                  ? 'Follows your voice through the configured token service.'
+                  : 'Follows your voice. Requires a Speechmatics key.'}
             </div>
           </>
         )}

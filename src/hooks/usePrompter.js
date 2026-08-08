@@ -15,7 +15,7 @@ export const PHASE = {
   ENDED: 'ended',
 }
 
-export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }) {
+export function usePrompter({ raw, settings, speechmaticsKey }) {
   const tokenProxyUrl = settings.tokenProxyUrl
   const doc = useMemo(() => parseScript(raw), [raw])
   const totalWords = doc.totalWords
@@ -329,8 +329,9 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
 
   const startVoiceSession = useCallback(async (attemptId) => {
     if (!speechmaticsKey && !tokenProxyUrl) {
-      setError('Add your Speechmatics key in Settings to follow your voice — switched to the Demo reader.')
-      onSourceFallback && onSourceFallback()
+      setError('Add your Speechmatics key in Settings to follow your voice.')
+      voiceStatusRef.current = 'error'
+      setVoiceStatus('error')
       return false
     }
     const client = new SpeechmaticsClient({
@@ -392,15 +393,21 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
       return true
     } catch (err) {
       if (startAttemptRef.current !== attemptId) return false
-      setError(`${err.message || 'Could not start microphone'} — switched to the Demo reader.`)
+      const permissionBlocked = err?.name === 'NotAllowedError' || /permission|denied|not allowed/i.test(err?.message || '')
+      setError(
+        permissionBlocked
+          ? 'Microphone access is blocked. Allow microphone access for this site in your browser, then press Start again.'
+          : `${err.message || 'Could not start microphone'}. Check microphone permission and try again.`,
+      )
       setMicStatus('error')
+      voiceStatusRef.current = 'error'
+      setVoiceStatus('error')
       mic && mic.stop()
       client.close()
       sessionRef.current = null
-      onSourceFallback && onSourceFallback()
       return false
     }
-  }, [speechmaticsKey, tokenProxyUrl, applyTranscript, onSourceFallback])
+  }, [speechmaticsKey, tokenProxyUrl, applyTranscript])
 
   const start = useCallback(async () => {
     if ([PHASE.CONNECTING, PHASE.COUNTDOWN, PHASE.RUNNING].includes(phaseRef.current)) return
