@@ -55,7 +55,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       const rowIndex = geometry.wordToRow.get(index)
       const row = rowIndex == null ? null : geometry.rows[rowIndex]
       if (!row) return 0
-      return clampOffset(stage.clientHeight * eyelineFraction - row.center)
+      return clampOffset(stage.clientHeight * eyelineFraction - row.guide)
     },
     [clampOffset, eyelineFraction],
   )
@@ -74,9 +74,9 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       const next = geometry.rows[rowIndex + 1]
       const wordCount = Math.max(1, row.endIndex - row.startIndex + 1)
       const progress = Math.max(0, Math.min(1, (position - row.startIndex) / wordCount))
-      const nextCenter = next?.center ?? row.center + (row.bottom - row.top)
-      const contentCenter = row.center + (nextCenter - row.center) * progress
-      return clampOffset(stage.clientHeight * eyelineFraction - contentCenter)
+      const nextGuide = next?.guide ?? row.guide + (row.bottom - row.top)
+      const contentGuide = row.guide + (nextGuide - row.guide) * progress
+      return clampOffset(stage.clientHeight * eyelineFraction - contentGuide)
     },
     [clampOffset, eyelineFraction, targetForIndex, totalWords],
   )
@@ -88,6 +88,10 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     const rowMap = new Map()
     const rows = []
     const wordEls = [...holder.querySelectorAll('[data-wid]')]
+    // Promptmatics uses its rail as the boundary immediately before the live
+    // row, not as a crosshair through the text. Keep a small, font-relative
+    // clearance so the glyphs remain unobstructed at every text size.
+    const guideClearance = Math.max(6, Math.min(14, fontSize * 0.18))
 
     for (const el of wordEls) {
       const index = Number(el.dataset.wid)
@@ -96,14 +100,14 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       let row = rows[rows.length - 1]
 
       if (!row || Math.abs(row.top - top) > 1) {
-        row = { top, bottom, startIndex: index, endIndex: index, center: 0 }
+        row = { top, bottom, startIndex: index, endIndex: index, guide: 0 }
         rows.push(row)
       } else {
         row.bottom = Math.max(row.bottom, bottom)
         row.endIndex = index
       }
 
-      row.center = (row.top + row.bottom) / 2
+      row.guide = row.top - guideClearance
       rowMap.set(index, rows.length - 1)
     }
 
@@ -117,7 +121,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     // resume the normal eased movement from this valid geometry.
     offsetRef.current = current >= 0 ? targetForIndex(current) : 0
     if (holder) holder.style.transform = `translateY(${clampOffset(offsetRef.current)}px)`
-  }, [clampOffset, currentIndex, targetForIndex])
+  }, [clampOffset, currentIndex, fontSize, targetForIndex])
 
   useLayoutEffect(() => {
     let frame
@@ -155,7 +159,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     let bestDistance = Infinity
 
     for (const row of geometry.rows) {
-      const distance = Math.abs(row.center + offset - eyeline)
+      const distance = Math.abs(row.guide + offset - eyeline)
       if (distance < bestDistance) {
         best = row
         bestDistance = distance
