@@ -50,6 +50,7 @@ body {
   position: absolute;
   inset: 0;
   overflow: hidden;
+  touch-action: none;
 }
 
 .prompter-mirror {

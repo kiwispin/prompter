@@ -13,10 +13,15 @@ const FONT_STACK = {
   serif: "Georgia, 'Times New Roman', serif",
 }
 
-export default function PrompterView({ doc, word, positionRef, totalWords, mode, settings }) {
+export default function PrompterView({ doc, word, positionRef, totalWords, mode, settings, onManualScroll }) {
   const stageRef = useRef(null)
   const linesRef = useRef(null)
   const [activeLine, setActiveLine] = useState(-1)
+  // manualRef holds the current translateY while the user is dragging/scrolling
+  // by hand; the auto-scroll loop stands down until it's released.
+  const manualRef = useRef(null)
+  const dragRef = useRef(null)
+  const wheelTimerRef = useRef(null)
 
   const { fontSize, lineHeight, sideMargins, fontFamily, matching } = settings
 
@@ -29,6 +34,81 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   useEffect(() => setActiveLine(activeLineId), [activeLineId])
 
   const highlightEnabled = mode === 'constant' ? false : matching !== 'none'
+
+  const clampOffset = useCallback((holder, stage, y) => {
+    const maxScroll = holder.scrollHeight - stage.clientHeight
+    return Math.max(-maxScroll, Math.min(y, stage.clientHeight))
+  }, [])
+
+  // Pick the word nearest the reading line (used after manual scroll).
+  const wordAtReadingLine = useCallback(() => {
+    const stage = stageRef.current
+    const holder = linesRef.current
+    if (!stage || !holder) return -1
+    const frac = EYELINE_FRACTION[settings.readingPos] ?? 0.5
+    const eyelineY = stage.getBoundingClientRect().top + stage.clientHeight * frac
+    let best = -1
+    let bestDist = Infinity
+    for (const el of holder.querySelectorAll('[data-wid]')) {
+      const r = el.getBoundingClientRect()
+      const d = Math.abs(r.top + r.height / 2 - eyelineY)
+      if (d < bestDist) {
+        bestDist = d
+        best = Number(el.dataset.wid)
+      }
+    }
+    return best
+  }, [settings.readingPos])
+
+  const syncAfterManual = useCallback(() => {
+    manualRef.current = null
+    const idx = wordAtReadingLine()
+    if (idx >= 0 && onManualScroll) onManualScroll(idx)
+  }, [wordAtReadingLine, onManualScroll])
+
+  const applyManual = useCallback(
+    (dy) => {
+      const holder = linesRef.current
+      const stage = stageRef.current
+      if (!holder || !stage) return
+      const next = clampOffset(holder, stage, dy)
+      manualRef.current = next
+      holder.style.transform = `translateY(${next}px)`
+    },
+    [clampOffset],
+  )
+
+  const onPointerDown = useCallback((e) => {
+    if (e.target && e.target.closest && e.target.closest('.toolbar, .hud, .panel, .onboard, .countdown')) return
+    if (!e.isPrimary) return
+    dragRef.current = { startY: e.clientY, moved: false, start: parseManual(linesRef.current) }
+    e.currentTarget.setPointerCapture && e.currentTarget.setPointerCapture(e.pointerId)
+  }, [])
+
+  const onPointerMove = useCallback((e) => {
+    const d = dragRef.current
+    if (!d) return
+    if (!d.moved && Math.abs(e.clientY - d.startY) < 6) return
+    d.moved = true
+    applyManual(d.start + (e.clientY - d.startY))
+  }, [applyManual])
+
+  const onPointerUp = useCallback(() => {
+    if (dragRef.current && dragRef.current.moved) syncAfterManual()
+    dragRef.current = null
+  }, [syncAfterManual])
+
+  const onWheel = useCallback(
+    (e) => {
+      const holder = linesRef.current
+      if (!holder) return
+      const current = parseManual(holder)
+      applyManual(current - e.deltaY)
+      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
+      wheelTimerRef.current = setTimeout(syncAfterManual, 200)
+    },
+    [applyManual, syncAfterManual],
+  )
 
   // Scroll loop. Pins the line you're reading at the eyeline (reading
   // position), interpolating between the current and next word rows so the
@@ -43,6 +123,11 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       const stage = stageRef.current
       const holder = linesRef.current
       if (stage && holder) {
+        if (manualRef.current != null) {
+          // User has hold of the text; keep their position.
+          raf = requestAnimationFrame(step)
+          return
+        }
         const frac = EYELINE_FRACTION[settings.readingPos] ?? 0.5
         const eyeline = stage.clientHeight * frac
         const pos = positionRef.current
@@ -83,6 +168,13 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     setActiveLine(activeLineId)
   }, [fontSize, lineHeight, sideMargins, fontFamily, activeLineId])
 
+  useEffect(
+    () => () => {
+      if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
+    },
+    [],
+  )
+
   const mirrorStyle = useMemo(() => {
     if (!settings.mirror) return {}
     switch (settings.mirrorAxis) {
@@ -106,6 +198,11 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     <div
       ref={stageRef}
       className="prompter-stage"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onWheel={onWheel}
       style={{
         '--font-size': `${fontSize}px`,
         '--line-height': lineHeight,
@@ -164,6 +261,13 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       <EyelineIndicator kind={settings.eyeline} fraction={EYELINE_FRACTION[settings.readingPos] ?? 0.5} />
     </div>
   )
+}
+
+function parseManual(holder) {
+  if (!holder) return 0
+  const t = holder.style.transform
+  const m = t && /translateY\((-?[\d.]+)px\)/.exec(t)
+  return m ? parseFloat(m[1]) : 0
 }
 
 function EyelineIndicator({ kind, fraction }) {

@@ -368,6 +368,24 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
     [totalWords, syncWord],
   )
 
+  // Jump the reading position to a specific word (used by manual scroll).
+  const setPosition = useCallback(
+    (idx) => {
+      clearTimers()
+      const i = Math.max(0, Math.min(totalWords - 1, Math.floor(idx)))
+      positionRef.current = i
+      wordRef.current = i
+      elapsedRef.current = 0
+      lastAdvanceAtRef.current = Date.now()
+      if (phaseRef.current === PHASE.COUNTDOWN) {
+        setCount(0)
+        setPhase(PHASE.IDLE)
+      }
+      setWord(i)
+    },
+    [totalWords],
+  )
+
   function clearTimers() {
     timersRef.current.forEach(clearInterval)
     timersRef.current = []
@@ -398,6 +416,7 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
     toggle,
     restart,
     nudge,
+    setPosition,
     clearError: () => setError(null),
     setError,
   }
