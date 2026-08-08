@@ -15,6 +15,8 @@ export default function SettingsPanel({ settings, setSetting, resetSettings, spe
           Your key stays in this browser and is sent only to Speechmatics to mint a short-lived session token.
           New accounts start with free credit.
         </p>
+
+        <ProxyRow value={settings.tokenProxyUrl} onChange={(v) => setSetting('tokenProxyUrl', v)} />
       </Section>
 
       <Section title="Scrolling">
@@ -254,6 +256,33 @@ function KeyRow({ label, hint, value, onChange, url }) {
         </div>
       )}
       <p className="panel-note">{hint} {url && <a href={url} target="_blank" rel="noreferrer">Get a free key ↗</a>}</p>
+    </div>
+  )
+}
+
+function ProxyRow({ value, onChange }) {
+  const [draft, setDraft] = useState(value || '')
+
+  return (
+    <div className="keyrow">
+      <div className="keyrow-head">
+        <span className="keyrow-label">Token proxy URL</span>
+        <span className={`chip chip-sm ${value ? 'chip-demo' : 'chip-paused'}`}>{value ? 'Set' : 'Optional'}</span>
+      </div>
+      <div className="keyrow-edit">
+        <input
+          type="url"
+          className="input"
+          placeholder="https://prompter-token.<you>.workers.dev"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => onChange(draft.trim())}
+        />
+      </div>
+      <p className="panel-note">
+        Advanced: a Cloudflare Worker that mints Speechmatics tokens, so devices never need your key. Leave empty to
+        use the key above.
+      </p>
     </div>
   )
 }

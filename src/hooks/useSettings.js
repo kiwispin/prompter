@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { load, save, remove, KEYS } from '../lib/storage'
+import { TOKEN_PROXY_URL } from '../config'
 
 export const DEFAULT_SETTINGS = {
   mode: 'voice', // 'constant' | 'voice'
@@ -9,6 +10,7 @@ export const DEFAULT_SETTINGS = {
   readingPos: 'center', // 'top' | 'center' | 'bottom'
   matching: 'word', // 'none' | 'word' | 'line'
   voiceCommands: true,
+  tokenProxyUrl: TOKEN_PROXY_URL,
   fontSize: 44,
   lineHeight: 1.55,
   sideMargins: 10, // percent 0-40

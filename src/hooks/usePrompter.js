@@ -14,6 +14,7 @@ export const PHASE = {
 }
 
 export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }) {
+  const tokenProxyUrl = settings.tokenProxyUrl
   const doc = useMemo(() => parseScript(raw), [raw])
   const totalWords = doc.totalWords
   const scriptLower = useMemo(() => doc.words.map((w) => w.lower), [doc])
@@ -262,13 +263,14 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
   }, [syncWord])
 
   const startVoiceSession = useCallback(async () => {
-    if (!speechmaticsKey) {
-      setError('Add your free Speechmatics key in Settings to follow your voice — switched to the Demo reader.')
+    if (!speechmaticsKey && !tokenProxyUrl) {
+      setError('Add your Speechmatics key in Settings to follow your voice — switched to the Demo reader.')
       onSourceFallback && onSourceFallback()
       return
     }
     const client = new SpeechmaticsClient({
       apiKey: speechmaticsKey,
+      tokenProxyUrl,
       language: 'en',
       model: 'enhanced',
       onPartial: (t) => {
@@ -302,7 +304,7 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
       sessionRef.current = null
       onSourceFallback && onSourceFallback()
     }
-  }, [speechmaticsKey, applyTranscript, onSourceFallback])
+  }, [speechmaticsKey, tokenProxyUrl, applyTranscript, onSourceFallback])
 
   const start = useCallback(async () => {
     if (phaseRef.current === PHASE.RUNNING || phaseRef.current === PHASE.COUNTDOWN) return

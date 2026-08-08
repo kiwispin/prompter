@@ -10,6 +10,30 @@
 export const RT_WS_HOST = 'global.rt.speechmatics.com'
 export const TEMP_KEY_URL = 'https://mp.speechmatics.com/v1/api_keys?type=rt'
 
+// Get a short-lived realtime token. Prefers the token proxy (no key on the
+// device); falls back to minting directly from the raw API key.
+export async function getTempKey({ apiKey, tokenProxyUrl } = {}) {
+  if (tokenProxyUrl) {
+    const res = await fetch(`${tokenProxyUrl.replace(/\/+$/, '')}/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    if (!res.ok) {
+      let detail = ''
+      try {
+        detail = (await res.json()).error || ''
+      } catch {}
+      const err = new Error(`Token proxy failed (${res.status})${detail ? `: ${detail}` : ''}`)
+      err.status = res.status
+      throw err
+    }
+    const data = await res.json()
+    if (!data.key) throw new Error('Token proxy returned no token')
+    return data.key
+  }
+  return mintTempKey(apiKey)
+}
+
 // Mint a short-lived realtime token from the long-lived API key.
 export async function mintTempKey(apiKey, { ttl = 60, host = TEMP_KEY_URL } = {}) {
   const res = await fetch(host, {
@@ -44,6 +68,7 @@ const AUDIO_FORMAT = { type: 'raw', encoding: 'pcm_s16le', sample_rate: 16000 }
 export class SpeechmaticsClient {
   constructor({
     apiKey,
+    tokenProxyUrl,
     language = 'en',
     model = 'enhanced',
     onPartial,
@@ -52,6 +77,7 @@ export class SpeechmaticsClient {
     onError,
   }) {
     this.apiKey = apiKey
+    this.tokenProxyUrl = tokenProxyUrl
     this.language = language
     this.model = model
     this.onPartial = onPartial || (() => {})
@@ -77,7 +103,7 @@ export class SpeechmaticsClient {
 
     let jwt
     try {
-      jwt = await mintTempKey(this.apiKey)
+      jwt = await getTempKey({ apiKey: this.apiKey, tokenProxyUrl: this.tokenProxyUrl })
     } catch (err) {
       this.onError(err)
       throw err

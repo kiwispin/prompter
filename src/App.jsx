@@ -139,7 +139,7 @@ export default function App() {
             lastTranscript={prompter.lastTranscript}
             totalWords={prompter.doc.totalWords}
             running={running}
-            hasKey={Boolean(speechmaticsKey)}
+            hasKey={Boolean(speechmaticsKey || settings.tokenProxyUrl)}
           />
         </>
       )}
