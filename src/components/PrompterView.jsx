@@ -133,6 +133,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
                       part.words.map((w) => (
                         <span
                           key={w.index}
+                          data-wid={w.index}
                           className={[
                             'pword',
                             highlightEnabled && w.index < word ? 'pword-read' : '',
