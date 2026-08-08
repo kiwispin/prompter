@@ -132,7 +132,7 @@ export default function App() {
 
   return (
     <div ref={rootRef} className={`app${chromeHidden ? ' chrome-hidden' : ''}`}>
-      <PrompterView doc={prompter.doc} word={prompter.word} positionRef={prompter.positionRef} totalWords={prompter.totalWords} mode={settings.mode} settings={settings} onManualScroll={prompter.setPosition} running={running} />
+      <PrompterView doc={prompter.doc} word={prompter.word} positionRef={prompter.positionRef} totalWords={prompter.totalWords} mode={settings.mode} settings={settings} onManualScroll={prompter.setPosition} running={running} voiceStatus={prompter.voiceStatus} wpm={prompter.stats.wpm} />
 
       {!chromeHidden && (
         <>

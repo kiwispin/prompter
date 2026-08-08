@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 export default function SettingsPanel({ settings, setSetting, resetSettings, speechmaticsKey, saveSpeechmaticsKey, onClose }) {
   const proxyConfigured = Boolean(settings.tokenProxyUrl)
@@ -60,6 +60,12 @@ export default function SettingsPanel({ settings, setSetting, resetSettings, spe
                   ? 'Follows your voice through the configured token service.'
                   : 'Follows your voice. Requires a Speechmatics key.'}
             </div>
+            {settings.source === 'mic' && (
+              <MicrophoneSelect
+                value={settings.micDeviceId || 'default'}
+                onChange={(value) => setSetting('micDeviceId', value)}
+              />
+            )}
           </>
         )}
 
@@ -90,6 +96,16 @@ export default function SettingsPanel({ settings, setSetting, resetSettings, spe
             ? 'Voice Sync keeps the active rendered row at this eyeline.'
             : 'Choose where the reading line sits during speed scroll or the demo reader.'}
         </div>
+        <Segmented
+          label="Position preset"
+          options={[
+            { value: 18, label: 'Top' },
+            { value: 50, label: 'Center' },
+            { value: 85, label: 'Bottom' },
+          ]}
+          value={settings.eyelinePercent}
+          onChange={(value) => setSetting('eyelinePercent', value)}
+        />
       </Section>
 
       <Section title="Matching">
@@ -341,6 +357,42 @@ function Slider({ label, value, min, max, step, suffix = '', onChange }) {
         onChange={(e) => onChange(parseFloat(e.target.value))}
       />
     </div>
+  )
+}
+
+function MicrophoneSelect({ value, onChange }) {
+  const [devices, setDevices] = useState([])
+
+  useEffect(() => {
+    let active = true
+    const refresh = async () => {
+      try {
+        const all = await navigator.mediaDevices?.enumerateDevices?.()
+        if (active) setDevices((all || []).filter((device) => device.kind === 'audioinput' && device.deviceId !== 'default'))
+      } catch {
+        if (active) setDevices([])
+      }
+    }
+    refresh()
+    navigator.mediaDevices?.addEventListener?.('devicechange', refresh)
+    return () => {
+      active = false
+      navigator.mediaDevices?.removeEventListener?.('devicechange', refresh)
+    }
+  }, [])
+
+  return (
+    <label className="field">
+      <span className="field-label">Microphone</span>
+      <select className="input field-select" value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="default">System default</option>
+        {devices.map((device, index) => (
+          <option key={device.deviceId} value={device.deviceId}>
+            {device.label || `Microphone ${index + 1}`}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }
 

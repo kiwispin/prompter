@@ -6,6 +6,7 @@ export const DEFAULT_SETTINGS = {
   uiVersion: 3,
   mode: 'voice', // 'constant' | 'voice'
   source: 'mic', // 'demo' | 'mic'
+  micDeviceId: 'default',
   baselineWpm: 150,
   autoLoop: false,
   readingPos: 'center', // 'top' | 'center' | 'bottom'

@@ -8,18 +8,20 @@ const FONT_STACK = {
   serif: "Georgia, 'Times New Roman', serif",
 }
 
-export default function PrompterView({ doc, word, positionRef, totalWords, mode, settings, onManualScroll, running }) {
+export default function PrompterView({ doc, word, positionRef, totalWords, mode, settings, onManualScroll, running, voiceStatus, wpm }) {
   const stageRef = useRef(null)
   const linesRef = useRef(null)
   const manualRef = useRef(null)
   const dragRef = useRef(null)
   const clickSuppressionRef = useRef(false)
   const offsetRef = useRef(null)
+  const targetOffsetRef = useRef(null)
   const momentumRef = useRef({ v: 0, running: false })
   const previousIndexRef = useRef(-1)
   const geometryRef = useRef({ rows: [], wordToRow: new Map() })
 
   const { fontSize, lineHeight, sideMargins, fontFamily, matching } = settings
+  const readingLead = fontSize * lineHeight * 0.62
   const eyelineFraction = useMemo(() => {
     if (Number.isFinite(settings.eyelinePercent)) {
       return Math.max(0.12, Math.min(0.88, settings.eyelinePercent / 100))
@@ -55,9 +57,9 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       const rowIndex = geometry.wordToRow.get(index)
       const row = rowIndex == null ? null : geometry.rows[rowIndex]
       if (!row) return 0
-      return clampOffset(stage.clientHeight * eyelineFraction - row.guide)
+      return clampOffset(stage.clientHeight * eyelineFraction - row.center - readingLead)
     },
-    [clampOffset, eyelineFraction],
+    [clampOffset, eyelineFraction, readingLead],
   )
 
   const targetForPosition = useCallback(
@@ -71,14 +73,19 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       const row = rowIndex == null ? null : geometry.rows[rowIndex]
       if (!row) return targetForIndex(index)
 
-      const next = geometry.rows[rowIndex + 1]
-      const wordCount = Math.max(1, row.endIndex - row.startIndex + 1)
-      const progress = Math.max(0, Math.min(1, (position - row.startIndex) / wordCount))
-      const nextGuide = next?.guide ?? row.guide + (row.bottom - row.top)
-      const contentGuide = row.guide + (nextGuide - row.guide) * progress
-      return clampOffset(stage.clientHeight * eyelineFraction - contentGuide)
+      const next = geometry.rows[rowIndex + 1] || row
+      const rowDistance = Math.abs(next.center - row.center)
+      const transitionWords = Math.min(
+        Math.max(1, row.endIndex - row.startIndex + 1),
+        Math.max(1, Math.ceil(rowDistance / Math.max(1, fontSize * lineHeight))),
+      )
+      const transitionStart = row.endIndex - transitionWords + 1
+      const progress = Math.max(0, Math.min(1, (position - transitionStart) / transitionWords))
+      const nextCenter = next.center
+      const contentCenter = row.center + (nextCenter - row.center) * progress
+      return clampOffset(stage.clientHeight * eyelineFraction - contentCenter - readingLead)
     },
-    [clampOffset, eyelineFraction, targetForIndex, totalWords],
+    [clampOffset, eyelineFraction, fontSize, lineHeight, readingLead, targetForIndex, totalWords],
   )
 
   const measureGeometry = useCallback(() => {
@@ -88,11 +95,6 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     const rowMap = new Map()
     const rows = []
     const wordEls = [...holder.querySelectorAll('[data-wid]')]
-    // Promptmatics uses its rail as the boundary immediately before the live
-    // row, not as a crosshair through the text. Keep a small, font-relative
-    // clearance so the glyphs remain unobstructed at every text size.
-    const guideClearance = Math.max(6, Math.min(14, fontSize * 0.18))
-
     for (const el of wordEls) {
       const index = Number(el.dataset.wid)
       const top = el.offsetTop
@@ -100,14 +102,14 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       let row = rows[rows.length - 1]
 
       if (!row || Math.abs(row.top - top) > 1) {
-        row = { top, bottom, startIndex: index, endIndex: index, guide: 0 }
+        row = { top, bottom, startIndex: index, endIndex: index, center: 0 }
         rows.push(row)
       } else {
         row.bottom = Math.max(row.bottom, bottom)
         row.endIndex = index
       }
 
-      row.guide = row.top - guideClearance
+      row.center = (row.top + row.bottom) / 2
       rowMap.set(index, rows.length - 1)
     }
 
@@ -120,12 +122,14 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     // Re-anchor immediately after a layout change. The next voice update will
     // resume the normal eased movement from this valid geometry.
     offsetRef.current = current >= 0 ? targetForIndex(current) : 0
+    targetOffsetRef.current = offsetRef.current
     if (holder) holder.style.transform = `translateY(${clampOffset(offsetRef.current)}px)`
-  }, [clampOffset, currentIndex, fontSize, targetForIndex])
+  }, [clampOffset, currentIndex, targetForIndex])
 
   useLayoutEffect(() => {
     let frame
     offsetRef.current = null
+    targetOffsetRef.current = null
     previousIndexRef.current = -1
     geometryRef.current = { rows: [], wordToRow: new Map() }
     const schedule = () => {
@@ -159,7 +163,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     let bestDistance = Infinity
 
     for (const row of geometry.rows) {
-      const distance = Math.abs(row.guide + offset - eyeline)
+      const distance = Math.abs(row.center + readingLead + offset - eyeline)
       if (distance < bestDistance) {
         best = row
         bestDistance = distance
@@ -167,12 +171,15 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     }
 
     return best.startIndex
-  }, [eyelineFraction])
+  }, [eyelineFraction, readingLead])
 
   const syncAfterManual = useCallback(() => {
     const released = manualRef.current
     manualRef.current = null
-    if (released != null) offsetRef.current = released
+    if (released != null) {
+      offsetRef.current = released
+      targetOffsetRef.current = released
+    }
     const index = wordAtReadingLine()
     if (index >= 0) onManualScroll?.(index)
   }, [onManualScroll, wordAtReadingLine])
@@ -271,8 +278,6 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   useEffect(() => {
     let raf
     let last = performance.now()
-    const tau = 0.36
-
     const step = (now) => {
       const stage = stageRef.current
       const holder = linesRef.current
@@ -298,20 +303,43 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
         } else if (manualRef.current == null) {
           const index = currentIndex()
           const previousIndex = previousIndexRef.current
+          const rewound = previousIndex - index > 4
           if (previousIndex > index && mode === 'constant') offsetRef.current = null
           previousIndexRef.current = index
 
-          if (mode === 'constant') {
-            offsetRef.current = targetForPosition(positionRef.current)
+          const continuousMode = mode === 'constant' || settings.source === 'demo'
+          if (continuousMode) {
+            targetOffsetRef.current = targetForPosition(positionRef.current)
           } else {
             if (offsetRef.current == null) offsetRef.current = targetForIndex(index)
-            const target = targetForIndex(index)
-            const alpha = 1 - Math.exp(-dt / tau)
-            const distance = target - offsetRef.current
-            const maxStep = 260 * dt
-            const stepDistance = Math.max(-maxStep, Math.min(maxStep, distance * alpha))
-            offsetRef.current += stepDistance
-            if (Math.abs(target - offsetRef.current) < 0.35) offsetRef.current = target
+            const base = targetForIndex(index)
+            if (targetOffsetRef.current == null || rewound) {
+              targetOffsetRef.current = base
+            } else {
+              // Tracking is monotonic. Recognition can move the cursor to a
+              // new rendered row, but partial-result churn never yanks the
+              // target backwards.
+              targetOffsetRef.current = Math.min(targetOffsetRef.current, base)
+            }
+
+            if (running && voiceStatus === 'listening' && matching === 'word') {
+              const pixelsPerWord = holder.scrollHeight / Math.max(1, totalWords + 40)
+              const pace = ((wpm || settings.baselineWpm || 150) / 60) * pixelsPerWord * dt
+              const leadLimit = base - 0.35 * fontSize * lineHeight
+              targetOffsetRef.current = Math.max(leadLimit, targetOffsetRef.current - pace)
+            }
+          }
+
+          if (offsetRef.current == null) offsetRef.current = targetOffsetRef.current ?? 0
+          const target = targetOffsetRef.current ?? offsetRef.current
+          if (continuousMode) {
+            // Fractional word interpolation already produces a continuous
+            // target; another lag layer can let the row catch up to the rail.
+            offsetRef.current = target
+          } else {
+            const alpha = 1 - Math.exp(-dt * 5.5)
+            offsetRef.current += (target - offsetRef.current) * alpha
+            if (Math.abs(target - offsetRef.current) < 0.2) offsetRef.current = target
           }
 
           holder.style.transform = `translateY(${clampOffset(offsetRef.current ?? 0)}px)`
@@ -323,7 +351,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
 
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
-  }, [clampOffset, currentIndex, mode, positionRef, syncAfterManual, targetForIndex, targetForPosition])
+  }, [clampOffset, currentIndex, fontSize, lineHeight, matching, mode, positionRef, running, settings.baselineWpm, settings.source, syncAfterManual, targetForIndex, targetForPosition, totalWords, voiceStatus, wpm])
 
   const mirrorStyle = useMemo(() => {
     if (!settings.mirror) return {}
@@ -438,17 +466,14 @@ function EyelineIndicator({ kind, fraction, running }) {
   if (kind === 'arrow') {
     return (
       <div className="eyeline eyeline-arrow" style={{ top }}>
-        <span className="eyeline-arrow-mark" />
+        <span className="eyeline-arrow-mark eyeline-arrow-left" />
+        <span className="eyeline-arrow-core" />
+        <span className="eyeline-arrow-mark eyeline-arrow-right" />
       </div>
     )
   }
   if (kind === 'line') {
-    return (
-      <div className={`eyeline eyeline-line${running ? ' eyeline-live' : ''}`} style={{ top }}>
-        <span className="eyeline-cap eyeline-cap-left" />
-        <span className="eyeline-cap eyeline-cap-right" />
-      </div>
-    )
+    return <div className={`eyeline eyeline-line${running ? ' eyeline-live' : ''}`} style={{ top }} />
   }
   if (kind === 'band') return <div className="eyeline eyeline-band" style={{ top }} />
   return null

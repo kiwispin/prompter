@@ -52,27 +52,14 @@ body {
   inset: 0;
   overflow: hidden;
   touch-action: none;
+  background:
+    radial-gradient(120% 70% at 50% 0%, rgba(25, 29, 37, 0.38) 0%, transparent 65%),
+    var(--bg);
 }
 
 .prompter-stage::before,
 .prompter-stage::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  height: 22vh;
-  pointer-events: none;
-  z-index: 4;
-}
-
-.prompter-stage::before {
-  top: 0;
-  background: linear-gradient(180deg, rgba(9, 11, 15, 0.98) 0%, rgba(9, 11, 15, 0.78) 26%, rgba(9, 11, 15, 0) 100%);
-}
-
-.prompter-stage::after {
-  bottom: 0;
-  background: linear-gradient(0deg, rgba(9, 11, 15, 0.99) 0%, rgba(9, 11, 15, 0.84) 30%, rgba(9, 11, 15, 0) 100%);
+  content: none;
 }
 
 .prompter-mirror {
@@ -111,6 +98,14 @@ body {
   padding: 0;
 }
 
+.pline-blank {
+  height: 0;
+  margin: 0;
+  padding: 0;
+  font-size: 0;
+  line-height: 0;
+}
+
 .pline-cue {
   color: var(--teal);
   font-style: italic;
@@ -125,11 +120,13 @@ body {
 }
 
 .pword {
-  transition: color 0.18s ease;
+  display: inline-block;
+  transition: color 0.26s ease;
 }
 
 .pword-read {
   color: #4b4e55;
+  transition-duration: 0.42s;
 }
 
 .pword-current {
@@ -168,46 +165,14 @@ body {
 }
 
 .eyeline-line {
-  left: 2.9%;
-  right: 2.9%;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(125, 131, 143, 0.18), rgba(125, 131, 143, 0.72) 8%, rgba(125, 131, 143, 0.72) 92%, rgba(125, 131, 143, 0.18));
-  box-shadow: 0 0 18px rgba(120, 126, 138, 0.16);
-  transition: background 0.25s ease, box-shadow 0.25s ease;
+  height: 2px;
+  background: rgba(239, 185, 85, 0.7);
+  box-shadow: 0 0 8px rgba(239, 185, 85, 0.38);
 }
 
 .eyeline-line.eyeline-live {
-  background: linear-gradient(90deg, rgba(239, 85, 85, 0.18), rgba(239, 85, 85, 0.9) 8%, rgba(239, 85, 85, 0.9) 92%, rgba(239, 85, 85, 0.18));
-  box-shadow: 0 0 18px rgba(239, 85, 85, 0.2);
-}
-
-.eyeline-cap {
-  position: absolute;
-  top: 50%;
-  width: 0;
-  height: 0;
-  transform: translateY(-50%);
-  border-top: 8px solid transparent;
-  border-bottom: 8px solid transparent;
-  opacity: 0.72;
-}
-
-.eyeline-cap-left {
-  left: -18px;
-  border-left: 11px solid #8a909a;
-}
-
-.eyeline-cap-right {
-  right: -18px;
-  border-right: 11px solid #8a909a;
-}
-
-.eyeline-live .eyeline-cap-left {
-  border-left-color: var(--red);
-}
-
-.eyeline-live .eyeline-cap-right {
-  border-right-color: var(--red);
+  background: rgba(239, 185, 85, 0.78);
+  box-shadow: 0 0 9px rgba(239, 185, 85, 0.44);
 }
 
 .eyeline-band {
@@ -221,16 +186,37 @@ body {
 .eyeline-arrow {
   transform: translateY(-50%);
   display: flex;
-  justify-content: center;
+  align-items: center;
+  color: #8a909a;
 }
 
 .eyeline-arrow-mark {
   width: 0;
   height: 0;
-  border-left: 12px solid transparent;
-  border-right: 12px solid transparent;
-  border-top: 16px solid var(--amber);
   opacity: 0.85;
+}
+
+.eyeline-arrow-left {
+  margin-left: 12px;
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-left: 13px solid currentColor;
+}
+
+.eyeline-arrow-right {
+  margin-right: 12px;
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-right: 13px solid currentColor;
+}
+
+.eyeline-arrow-core {
+  flex: 1;
+  height: 2px;
+  margin: 0 12px;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+  opacity: 0.72;
 }
 
 /* ---------- Toolbar ---------- */
@@ -1006,6 +992,14 @@ body {
 
 .input:focus {
   border-color: var(--accent);
+}
+
+.field-select {
+  height: 38px;
+  min-height: 38px;
+  margin-top: 8px;
+  padding: 0 12px;
+  color-scheme: dark;
 }
 
 .input-lg {

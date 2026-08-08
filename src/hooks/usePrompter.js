@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { parseScript } from '../lib/parser'
-import { matchTranscriptDetailed, tokenize } from '../lib/matcher'
 import { detectCommand } from '../lib/commands'
 import { SpeechmaticsClient } from '../lib/speechmatics'
 import { startMic } from '../lib/mic'
 import { calculateMeasuredWpm } from '../lib/stats'
+import { ALIGNER_STATE, ScriptAligner } from '../lib/aligner'
 
 export const PHASE = {
   IDLE: 'idle',
@@ -23,6 +23,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
 
   // Always-fresh refs so stable callbacks never read stale script data.
   const scriptLowerRef = useRef(scriptLower)
+  const alignerRef = useRef(new ScriptAligner(doc.words))
   useEffect(() => {
     scriptLowerRef.current = scriptLower
   }, [scriptLower])
@@ -81,6 +82,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
   useEffect(() => {
     startAttemptRef.current += 1
     stopSession()
+    alignerRef.current = new ScriptAligner(doc.words)
     positionRef.current = 0
     wordRef.current = -1
     elapsedRef.current = 0
@@ -212,6 +214,8 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
         if (settings.source === 'mic') {
           if (micStatus === 'error' || sttStatus === 'error') vs = 'error'
           else if (micStatus !== 'live' || sttStatus !== 'recording') vs = 'starting'
+          else if (alignerRef.current.state === ALIGNER_STATE.OFFSCRIPT) vs = 'offscript'
+          else if (alignerRef.current.state === ALIGNER_STATE.PAUSED) vs = 'waiting'
           else if (now - lastTranscriptAtRef.current > 2200) vs = 'waiting'
           else if (now - lastAdvanceAtRef.current > 1500) vs = 'offscript'
           else vs = 'listening'
@@ -234,6 +238,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
     statsStartElapsedRef.current = 0
     pendingMatchRef.current = null
     lastAdvanceAtRef.current = Date.now()
+    alignerRef.current.jumpTo(0)
     setWord(-1)
     refreshStats()
   }, [refreshStats])
@@ -279,9 +284,10 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
     }
   }
 
-  const applyTranscript = useCallback((t, { final = false } = {}) => {
+  const applyRecognition = useCallback((words, { final = false, endTimes = [], confidences = [] } = {}) => {
+    const transcript = words.join(' ')
     if (engine.current.voiceCommands !== false) {
-      const cmd = detectCommand(t)
+      const cmd = final ? detectCommand(transcript) : null
       if (cmd === 'rewind') {
         clearTimers()
         positionRef.current = 0
@@ -291,6 +297,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
         statsStartElapsedRef.current = 0
         pendingMatchRef.current = null
         lastAdvanceAtRef.current = Date.now()
+        alignerRef.current.jumpTo(0)
         setWord(-1)
         if (phaseRef.current !== PHASE.RUNNING) setPhase(PHASE.IDLE)
         flashNotice('Rewound to the start')
@@ -298,32 +305,27 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       }
     }
     if (phaseRef.current !== PHASE.RUNNING) return
-    const spoken = tokenize(t)
-    if (!spoken.length) return
-    const scriptLower = scriptLowerRef.current
-    const from = Math.max(0, Math.floor(positionRef.current))
-    const match = matchTranscriptDetailed(spoken, scriptLower, from, { final })
-    if (!match) {
-      if (final) pendingMatchRef.current = null
-      return
-    }
-
-    const candidateKey = `${match.start}:${match.end}`
-    const pending = pendingMatchRef.current
-    const candidateCount = pending && pending.key === candidateKey ? pending.count + 1 : 1
-    pendingMatchRef.current = { key: candidateKey, count: candidateCount }
-
-    // Partials are useful for responsiveness but should not move the page on
-    // one ambiguous word. Final results, longer runs, or repeated partials are
-    // strong enough evidence to commit.
-    const shouldCommit = final || match.length >= 3 || candidateCount >= 2
-    if (!shouldCommit) return
-
-    const target = match.end + 1
-    if (target > positionRef.current) {
+    if (!words.length) return
+    const result = final
+      ? alignerRef.current.feedFinal(words, endTimes, confidences)
+      : alignerRef.current.feedPartial(words)
+    const target = result.provisional
+    if (target !== positionRef.current) {
       positionRef.current = target
       lastAdvanceAtRef.current = Date.now()
       syncWord()
+    }
+    const nextVoiceStatus =
+      result.state === ALIGNER_STATE.OFFSCRIPT
+        ? 'offscript'
+        : result.state === ALIGNER_STATE.PAUSED
+          ? 'waiting'
+          : result.state === ALIGNER_STATE.LIVE
+            ? 'listening'
+            : voiceStatusRef.current
+    if (nextVoiceStatus !== voiceStatusRef.current) {
+      voiceStatusRef.current = nextVoiceStatus
+      setVoiceStatus(nextVoiceStatus)
     }
   }, [syncWord])
 
@@ -334,34 +336,64 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       setVoiceStatus('error')
       return false
     }
-    const client = new SpeechmaticsClient({
+    let mic
+    let client
+    let fatalHandled = false
+    const failLiveSession = (message) => {
+      if (startAttemptRef.current !== attemptId || fatalHandled) return
+      fatalHandled = true
+      setError(message)
+      setSttStatus('error')
+      setMicStatus('error')
+      voiceStatusRef.current = 'error'
+      setVoiceStatus('error')
+      mic?.stop()
+      client?.close()
+      sessionRef.current = null
+      phaseRef.current = positionRef.current > 0 ? PHASE.PAUSED : PHASE.IDLE
+      setPhase(phaseRef.current)
+    }
+
+    const additionalVocab = [...new Set(scriptLowerRef.current.filter((token) => token.length >= 4))].slice(0, 500)
+    client = new SpeechmaticsClient({
       apiKey: speechmaticsKey,
       tokenProxyUrl,
       language: 'en',
       model: 'enhanced',
+      additionalVocab,
       onPartial: (t) => {
         if (startAttemptRef.current !== attemptId) return
         lastTranscriptAtRef.current = Date.now()
         setLastTranscript(t)
-        applyTranscript(t, { final: false })
       },
       onFinal: (t) => {
         if (startAttemptRef.current !== attemptId) return
         lastTranscriptAtRef.current = Date.now()
         setLastTranscript(t)
-        applyTranscript(t, { final: true })
+      },
+      onPartialResult: ({ words }) => applyRecognition(words, { final: false }),
+      onFinalResult: ({ words, endTimes, confidences }) => applyRecognition(words, { final: true, endTimes, confidences }),
+      onEndOfUtterance: () => {
+        if (startAttemptRef.current !== attemptId) return
+        const result = alignerRef.current.endUtterance()
+        if (result.state === ALIGNER_STATE.PAUSED) {
+          voiceStatusRef.current = 'waiting'
+          setVoiceStatus('waiting')
+        }
       },
       onStatus: (st) => {
         if (startAttemptRef.current === attemptId) setSttStatus(st)
       },
       onError: (err) => {
-        if (startAttemptRef.current !== attemptId) return
-        setError(err.message || 'Speechmatics error')
-        setSttStatus('error')
+        failLiveSession(err.message || 'Speechmatics error')
+      },
+      onClosed: (event) => {
+        if ([PHASE.CONNECTING, PHASE.COUNTDOWN, PHASE.RUNNING].includes(phaseRef.current)) {
+          failLiveSession(event?.code ? `Speechmatics connection closed (${event.code}).` : 'Speechmatics connection closed.')
+        }
       },
     })
 
-    let mic
     let clientReady = false
     try {
       setMicStatus('connecting')
@@ -376,6 +408,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
         (st) => {
           if (startAttemptRef.current === attemptId) setMicStatus(st === 'live' ? 'live' : 'off')
         },
+        { deviceId: settings.micDeviceId },
       )
       if (startAttemptRef.current !== attemptId) {
         mic.stop()
@@ -392,7 +425,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       clientReady = true
       return true
     } catch (err) {
-      if (startAttemptRef.current !== attemptId) return false
+      if (startAttemptRef.current !== attemptId || fatalHandled) return false
       const permissionBlocked = err?.name === 'NotAllowedError' || /permission|denied|not allowed/i.test(err?.message || '')
       setError(
         permissionBlocked
@@ -407,7 +440,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       sessionRef.current = null
       return false
     }
-  }, [speechmaticsKey, tokenProxyUrl, applyTranscript])
+  }, [speechmaticsKey, tokenProxyUrl, applyRecognition, settings.micDeviceId])
 
   const start = useCallback(async () => {
     if ([PHASE.CONNECTING, PHASE.COUNTDOWN, PHASE.RUNNING].includes(phaseRef.current)) return
@@ -489,6 +522,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       statsStartElapsedRef.current = elapsedRef.current
       pendingMatchRef.current = null
       lastAdvanceAtRef.current = Date.now()
+      alignerRef.current.jumpTo(positionRef.current)
       if (activePhase !== PHASE.RUNNING || delta === 0) setPhase(PHASE.IDLE)
       syncWord()
       refreshStats()
@@ -507,6 +541,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       statsStartElapsedRef.current = elapsedRef.current
       pendingMatchRef.current = null
       lastAdvanceAtRef.current = Date.now()
+      alignerRef.current.jumpTo(i)
       if (phaseRef.current === PHASE.COUNTDOWN || phaseRef.current === PHASE.CONNECTING) {
         startAttemptRef.current += 1
         stopSession()

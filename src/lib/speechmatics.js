@@ -14,22 +14,28 @@ export const TEMP_KEY_URL = 'https://mp.speechmatics.com/v1/api_keys?type=rt'
 // device); falls back to minting directly from the raw API key.
 export async function getTempKey({ apiKey, tokenProxyUrl } = {}) {
   if (tokenProxyUrl) {
-    const res = await fetch(`${tokenProxyUrl.replace(/\/+$/, '')}/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    })
-    if (!res.ok) {
-      let detail = ''
-      try {
-        detail = (await res.json()).error || ''
-      } catch {}
-      const err = new Error(`Token proxy failed (${res.status})${detail ? `: ${detail}` : ''}`)
-      err.status = res.status
-      throw err
+    try {
+      const res = await fetch(`${tokenProxyUrl.replace(/\/+$/, '')}/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (!res.ok) {
+        let detail = ''
+        try {
+          detail = (await res.json()).error || ''
+        } catch {}
+        const err = new Error(`Token proxy failed (${res.status})${detail ? `: ${detail}` : ''}`)
+        err.status = res.status
+        throw err
+      }
+      const data = await res.json()
+      if (!data.key) throw new Error('Token proxy returned no token')
+      return data.key
+    } catch (error) {
+      // A manually entered key is a real fallback when the optional proxy is
+      // unavailable. Without one, preserve the useful proxy error.
+      if (!apiKey) throw error
     }
-    const data = await res.json()
-    if (!data.key) throw new Error('Token proxy returned no token')
-    return data.key
   }
   return mintTempKey(apiKey)
 }
@@ -65,14 +71,48 @@ export async function mintTempKey(apiKey, { ttl = 60, host = TEMP_KEY_URL } = {}
 
 const AUDIO_FORMAT = { type: 'raw', encoding: 'pcm_s16le', sample_rate: 16000 }
 
+export function wordsFrom(message) {
+  const words = []
+  const endTimes = []
+  const confidences = []
+  for (const result of message?.results || []) {
+    if (result?.type !== 'word' || !result.alternatives?.length) continue
+    words.push(result.alternatives[0].content || '')
+    endTimes.push(result.end_time ?? null)
+    confidences.push(result.alternatives[0].confidence ?? null)
+  }
+  return { words, endTimes, confidences }
+}
+
+export function buildStartRecognition({ language = 'en', operatingPoint = 'enhanced', additionalVocab = [] } = {}) {
+  const transcriptionConfig = {
+    language,
+    operating_point: operatingPoint,
+    max_delay: 1,
+    enable_partials: true,
+    conversation_config: { end_of_utterance_silence_trigger: 0.7 },
+  }
+  if (additionalVocab.length) transcriptionConfig.additional_vocab = additionalVocab
+  return {
+    message: 'StartRecognition',
+    audio_format: AUDIO_FORMAT,
+    transcription_config: transcriptionConfig,
+  }
+}
+
 export class SpeechmaticsClient {
   constructor({
     apiKey,
     tokenProxyUrl,
     language = 'en',
     model = 'enhanced',
+    additionalVocab = [],
     onPartial,
     onFinal,
+    onPartialResult,
+    onFinalResult,
+    onEndOfUtterance,
+    onClosed,
     onStatus,
     onError,
   }) {
@@ -80,8 +120,13 @@ export class SpeechmaticsClient {
     this.tokenProxyUrl = tokenProxyUrl
     this.language = language
     this.model = model
+    this.additionalVocab = additionalVocab
     this.onPartial = onPartial || (() => {})
     this.onFinal = onFinal || (() => {})
+    this.onPartialResult = onPartialResult || (() => {})
+    this.onFinalResult = onFinalResult || (() => {})
+    this.onEndOfUtterance = onEndOfUtterance || (() => {})
+    this.onClosed = onClosed || (() => {})
     this.onStatus = onStatus || (() => {})
     this.onError = onError || (() => {})
     this.ws = null
@@ -149,16 +194,11 @@ export class SpeechmaticsClient {
   }
 
   sendStart() {
-    this.sendJson({
-      message: 'StartRecognition',
-      audio_format: AUDIO_FORMAT,
-      transcription_config: {
-        language: this.language,
-        model: this.model,
-        max_delay: 0.7,
-        enable_partials: true,
-      },
-    })
+    this.sendJson(buildStartRecognition({
+      language: this.language,
+      operatingPoint: this.model,
+      additionalVocab: this.additionalVocab,
+    }))
   }
 
   waitForStart() {
@@ -207,14 +247,19 @@ export class SpeechmaticsClient {
         this.lastSeqNo = data.seq_no
         break
       case 'AddPartialTranscript':
+        this.onPartialResult(wordsFrom(data))
         if (data.metadata && data.metadata.transcript) {
           this.onPartial(data.metadata.transcript)
         }
         break
       case 'AddTranscript':
+        this.onFinalResult(wordsFrom(data))
         if (data.metadata && data.metadata.transcript) {
           this.onFinal(data.metadata.transcript)
         }
+        break
+      case 'EndOfUtterance':
+        this.onEndOfUtterance()
         break
       case 'Error':
         this.onError(new Error(data.type ? `${data.type}: ${data.reason}` : 'Speechmatics error'))
@@ -232,6 +277,7 @@ export class SpeechmaticsClient {
     }
     this.started = false
     this.onStatus('closed')
+    this.onClosed(ev)
   }
 
   sendJson(obj) {
