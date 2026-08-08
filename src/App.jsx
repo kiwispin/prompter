@@ -50,6 +50,12 @@ export default function App() {
     dismissOnboarding()
   }, [dismissOnboarding, setSetting])
 
+  const toggleMirror = useCallback(() => {
+    const next = !settings.mirror
+    setSetting('mirror', next)
+    if (next && settings.mirrorAxis === 'none') setSetting('mirrorAxis', 'h')
+  }, [setSetting, settings.mirror, settings.mirrorAxis])
+
   // Error toast
   useEffect(() => {
     if (!prompter.error) return
@@ -79,6 +85,14 @@ export default function App() {
         prompter.nudge(1)
       } else if (k === 's') {
         setShowSettings((v) => !v)
+      } else if (k === ',') {
+        setShowSettings((v) => !v)
+      } else if (k === 'e') {
+        setShowScripts((v) => !v)
+      } else if (k === 'm') {
+        toggleMirror()
+      } else if (e.key === '?') {
+        setShowOnboarding(true)
       } else if (k === 'f') {
         toggleFullscreen()
       } else if (k === 'h') {
@@ -129,10 +143,13 @@ export default function App() {
             activeName={scripts.active.name}
             onToggle={() => (running || busy ? prompter.stop() : prompter.start())}
             onRestart={prompter.restart}
-            onNudge={prompter.nudge}
             onOpenSettings={() => setShowSettings(true)}
             onOpenScripts={() => setShowScripts(true)}
             onToggleFullscreen={toggleFullscreen}
+            onToggleMirror={toggleMirror}
+            onOpenTour={() => setShowOnboarding(true)}
+            mirror={settings.mirror}
+            hasVoiceConfig={Boolean(speechmaticsKey || settings.tokenProxyUrl)}
             micStatus={prompter.micStatus}
             voiceStatus={prompter.voiceStatus}
             mode={settings.mode}

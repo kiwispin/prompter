@@ -13,7 +13,7 @@
   --amber: #efb955;
   --red: #ef5555;
   --radius: 10px;
-  --toolbar-h: 53px;
+  --toolbar-h: 52px;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -244,14 +244,14 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: calc(7px + env(safe-area-inset-top)) 16px 7px;
-  background: rgba(16, 18, 23, 0.91);
-  backdrop-filter: blur(18px) saturate(120%);
-  -webkit-backdrop-filter: blur(18px) saturate(120%);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  gap: 12px;
+  padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+  background: rgba(21, 23, 29, 0.82);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid rgba(75, 79, 89, 0.5);
   z-index: 20;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  box-shadow: none;
 }
 
 .toolbar-identity,
@@ -267,16 +267,16 @@ body {
 }
 
 .toolbar-actions {
-  gap: 3px;
+  gap: 6px;
   justify-content: flex-end;
 }
 
 .toolbar-mark {
   position: relative;
-  width: 29px;
-  height: 29px;
-  flex: 0 0 29px;
-  border-radius: 7px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 6px;
   background: #eef0ec;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.16);
 }
@@ -297,15 +297,15 @@ body {
 .toolbar-mark::after {
   width: 5px;
   height: 5px;
-  left: 12px;
-  top: 12px;
+  left: 11.5px;
+  top: 11.5px;
   background: var(--accent);
 }
 
 .toolbar-mark span {
   left: 4px;
   right: 4px;
-  top: 14px;
+  top: 13.5px;
   height: 1px;
   background: #55747b;
 }
@@ -317,24 +317,23 @@ body {
 }
 
 .toolbar-brand strong {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: -0.015em;
 }
 
 .toolbar-brand small {
-  margin-top: 3px;
+  margin-top: 2px;
   color: #777c86;
   font-size: 8px;
   font-weight: 600;
-  letter-spacing: 0.17em;
+  letter-spacing: 0.15em;
   text-transform: uppercase;
 }
 
 .toolbar-title {
-  padding-left: 12px;
-  margin-left: 4px;
-  border-left: 1px solid var(--border);
+  padding-left: 6px;
+  margin-left: 0;
   font-size: 13px;
   color: var(--text-dim);
   white-space: nowrap;
@@ -347,51 +346,121 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border: none;
   background: transparent;
   color: var(--text);
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
 .toolbar-btn {
-  min-width: 36px;
-  padding: 0 8px;
-}
-
-.toolbar-btn-label {
-  display: none;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.toolbar-voice-chip {
-  max-width: 190px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 32px;
+  padding: 0;
 }
 
 .iconbtn:hover {
-  background: var(--panel2);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.toolbar-btn-active {
+  color: var(--accent);
+  background: rgba(239, 185, 85, 0.1);
+}
+
+.toolbar-nudge {
+  height: 26px;
+  min-width: 222px;
+  display: inline-flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid rgba(63, 128, 119, 0.42);
+  border-radius: 999px;
+  background: rgba(49, 101, 94, 0.19);
+  color: #79c7bb;
+  white-space: nowrap;
+}
+
+.toolbar-nudge-main,
+.toolbar-nudge-close {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.toolbar-nudge-main {
+  flex: 1;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 5px 5px 12px;
+  font: 500 12px 'Inter Tight', sans-serif;
+}
+
+.toolbar-nudge-close {
+  padding: 6px 9px 6px 4px;
+}
+
+.toolbar-nudge-main:hover,
+.toolbar-nudge-close:hover {
+  color: #a0ddd4;
+}
+
+.toolbar-state {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid rgba(75, 79, 89, 0.42);
+  border-radius: 999px;
+  color: #868b94;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.toolbar-state-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.toolbar-state-live {
+  color: #e96262;
+}
+
+.toolbar-state-live .toolbar-state-dot {
+  box-shadow: 0 0 7px currentColor;
+}
+
+.toolbar-state-busy,
+.toolbar-state-paused {
+  color: var(--accent);
 }
 
 .toolbar-primary {
-  height: 36px;
-  margin-left: 8px;
-  padding: 0 14px;
+  height: 32px;
+  min-width: 72px;
+  margin-left: 4px;
+  padding: 0 12px;
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 6px;
   background: var(--accent);
   color: #211807;
-  font: 700 13px 'Inter Tight', sans-serif;
+  font: 500 13px 'Inter Tight', sans-serif;
   cursor: pointer;
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.22);
+  box-shadow: none;
 }
 
 .toolbar-primary:hover {
@@ -399,12 +468,7 @@ body {
 }
 
 .toolbar-primary-live {
-  box-shadow: 0 0 0 2px rgba(239, 185, 85, 0.2);
-}
-
-.toolbar-primary svg {
-  width: 15px;
-  height: 15px;
+  box-shadow: 0 0 0 2px rgba(239, 185, 85, 0.24);
 }
 
 .iconbtn-danger:hover {
@@ -1255,6 +1319,12 @@ body {
 
 /* ---------- Responsive tweaks ---------- */
 
+@media (max-width: 900px) {
+  .toolbar-nudge {
+    display: none;
+  }
+}
+
 @media (max-width: 720px) {
   .toolbar-title {
     display: none;
@@ -1305,12 +1375,8 @@ body {
     flex: 0 0 29px;
   }
 
-  .toolbar-btn-back,
-  .toolbar-btn-forward {
-    display: none;
-  }
-
-  .toolbar-voice-chip {
+  .toolbar-state,
+  .toolbar-btn-help {
     display: none;
   }
 
