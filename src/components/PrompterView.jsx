@@ -2,9 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { LINE_TEXT, LINE_HEADING, LINE_CUE } from '../lib/parser'
 
 const EYELINE_FRACTION = {
-  top: 0.16,
-  center: 0.5,
-  bottom: 0.84,
+  top: 0.18,
+  center: 0.55,
+  bottom: 0.85,
 }
 
 const FONT_STACK = {
@@ -30,9 +30,10 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
 
   const highlightEnabled = mode === 'constant' ? false : matching !== 'none'
 
-  // Scroll loop. Tracks the continuous float position so the text glides
-  // smoothly through each line. Microphone mode eases between recognition
-  // bursts; demo/constant track exactly since their position is already smooth.
+  // Scroll loop. Pins the line you're reading at the eyeline (reading
+  // position), interpolating between the current and next word rows so the
+  // text glides smoothly past it like a hardware prompter. Microphone mode
+  // eases between recognition bursts; demo/constant track exactly.
   useEffect(() => {
     let raf
     let current = 0
@@ -45,19 +46,16 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
         const frac = EYELINE_FRACTION[settings.readingPos] ?? 0.5
         const eyeline = stage.clientHeight * frac
         const pos = positionRef.current
+        const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(pos)))
         let target = 0
 
-        const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(pos)))
-        const lineId = doc.wordLine.get(idx)
-        const el = lineId != null ? holder.querySelector(`[data-line="${lineId}"]`) : holder.querySelector('[data-line]')
-        if (el) {
-          const lineObj = lineId != null ? doc.lines.find((l) => l.id === lineId) : null
-          let cy = el.offsetTop + el.offsetHeight / 2
-          const next = nextTextLineEl(holder, Number(el.dataset.line))
-          if (next && lineObj && lineObj.words.length) {
-            const fracLine = Math.max(0, Math.min(1, (pos - lineObj.startIndex) / lineObj.words.length))
-            const nextC = next.offsetTop + next.offsetHeight / 2
-            cy = cy + fracLine * (nextC - cy)
+        const el0 = holder.querySelector(`[data-wid="${idx}"]`)
+        if (el0) {
+          let cy = el0.offsetTop + el0.offsetHeight / 2
+          const el1 = holder.querySelector(`[data-wid="${idx + 1}"]`)
+          if (el1) {
+            const c1 = el1.offsetTop + el1.offsetHeight / 2
+            cy += (pos - Math.floor(pos)) * (c1 - cy)
           }
           target = eyeline - cy
         }
@@ -165,16 +163,6 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       <EyelineIndicator kind={settings.eyeline} fraction={EYELINE_FRACTION[settings.readingPos] ?? 0.5} />
     </div>
   )
-}
-
-function nextTextLineEl(holder, lineId) {
-  const els = holder.querySelectorAll('[data-line]')
-  for (let i = 0; i < els.length; i++) {
-    if (Number(els[i].dataset.line) === lineId) {
-      return els[i + 1] || null
-    }
-  }
-  return null
 }
 
 function EyelineIndicator({ kind, fraction }) {
