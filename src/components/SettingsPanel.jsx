@@ -1,19 +1,26 @@
 import { useState } from 'react'
 
 export default function SettingsPanel({ settings, setSetting, resetSettings, speechmaticsKey, saveSpeechmaticsKey, onClose }) {
+  const proxyConfigured = Boolean(settings.tokenProxyUrl)
   return (
     <PanelShell title="Settings" onClose={onClose}>
       <Section title="API keys">
         <KeyRow
           label="Speechmatics"
-          hint="Required for live voice tracking — the Demo reader needs no key."
+          auto={proxyConfigured}
+          hint={
+            proxyConfigured
+              ? 'Automatic via token proxy — no key needed on any device. Optional manual key is used as a fallback.'
+              : 'Required for live voice tracking — the Demo reader needs no key.'
+          }
           value={speechmaticsKey}
           onChange={saveSpeechmaticsKey}
           url="https://portal.speechmatics.com/api-keys"
         />
         <p className="panel-note">
-          Your key stays in this browser and is sent only to Speechmatics to mint a short-lived session token.
-          New accounts start with free credit.
+          {proxyConfigured
+            ? 'Tokens are minted by your Cloudflare Worker; your key never reaches this device.'
+            : 'Your key stays in this browser and is sent only to Speechmatics to mint a short-lived session token. New accounts start with free credit.'}
         </p>
 
         <ProxyRow value={settings.tokenProxyUrl} onChange={(v) => setSetting('tokenProxyUrl', v)} />
@@ -202,7 +209,7 @@ export function Section({ title, children }) {
   )
 }
 
-function KeyRow({ label, hint, value, onChange, url }) {
+function KeyRow({ label, hint, value, onChange, url, auto }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value || '')
   const present = Boolean(value)
@@ -216,7 +223,9 @@ function KeyRow({ label, hint, value, onChange, url }) {
     <div className="keyrow">
       <div className="keyrow-head">
         <span className="keyrow-label">{label}</span>
-        <span className={`chip chip-sm ${present ? 'chip-demo' : 'chip-paused'}`}>{present ? 'Set' : 'Missing'}</span>
+        <span className={`chip chip-sm ${auto ? 'chip-demo' : present ? 'chip-demo' : 'chip-paused'}`}>
+          {auto ? 'Auto' : present ? 'Set' : 'Missing'}
+        </span>
       </div>
       {!editing ? (
         <div className="keyrow-actions">

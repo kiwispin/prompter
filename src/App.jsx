@@ -189,6 +189,7 @@ export default function App() {
           onDone={dismissOnboarding}
           onWatchDemo={watchDemo}
           onSaveKey={useMicrophone}
+          tokenProxyUrl={settings.tokenProxyUrl}
         />
       )}
 
