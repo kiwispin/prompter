@@ -21,8 +21,6 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   // by hand; the auto-scroll loop stands down until it's released.
   const manualRef = useRef(null)
   const dragRef = useRef(null)
-  const wheelSettleRef = useRef(null)
-  const wheelTargetRef = useRef(null) // eased scroll target while wheeling
   // Authoritative scroll offset (px) shared by rate, mic and manual scrolling.
   const offsetRef = useRef(null)
   // Momentum (px/ms) after a manual flick.
@@ -94,8 +92,6 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     if (e.target && e.target.closest && e.target.closest('.toolbar, .hud, .panel, .onboard, .countdown')) return
     if (!e.isPrimary) return
     momentumRef.current.running = false
-    wheelTargetRef.current = null
-    if (wheelSettleRef.current) clearTimeout(wheelSettleRef.current)
     dragRef.current = {
       startY: e.clientY,
       prevY: e.clientY,
@@ -138,19 +134,21 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   const onWheel = useCallback(
     (e) => {
       const holder = linesRef.current
-      const stage = stageRef.current
-      if (!holder || !stage) return
-      if (momentumRef.current.running) momentumRef.current.running = false
+      if (!holder) return
       let delta = e.deltaY
       if (e.deltaMode === 1) delta *= 16
-      const base = manualRef.current != null ? manualRef.current : offsetRef.current
-      const target = clampOffset(holder, stage, (base != null ? base : 0) - delta * 0.5)
-      wheelTargetRef.current = target
-      if (manualRef.current == null) manualRef.current = base != null ? base : 0
-      if (wheelSettleRef.current) clearTimeout(wheelSettleRef.current)
-      wheelSettleRef.current = setTimeout(syncAfterManual, 220)
+      // Impulse: each tick gives the text a push; friction decays it to a
+      // natural "go and slow" stop, like a hardware prompter.
+      const m = momentumRef.current
+      if (!m.running) {
+        m.running = true
+        m.v = 0
+      }
+      m.v += (-delta * 0.5) / 240 // px/ms
+      m.v = Math.max(-1.2, Math.min(1.2, m.v))
+      if (manualRef.current == null) manualRef.current = offsetRef.current != null ? offsetRef.current : 0
     },
-    [clampOffset, syncAfterManual],
+    [],
   )
 
   // Scroll loop.
@@ -194,18 +192,17 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
           return
         }
 
-        // Eased wheel scrolling: glide toward the target over ~180ms.
-        if (wheelTargetRef.current != null) {
-          const target = wheelTargetRef.current
-          const cur = manualRef.current != null ? manualRef.current : offsetRef.current
-          const e = 1 - Math.pow(0.0005, dt / 0.18)
-          let next = cur + (target - cur) * e
-          next = clamp(next)
-          manualRef.current = next
-          holder.style.transform = `translateY(${next}px)`
-          if (Math.abs(target - next) < 0.5) {
-            manualRef.current = target
-            wheelTargetRef.current = null
+        // Momentum / inertia (drag flick + wheel impulse): "go and slow".
+        if (momentumRef.current.running) {
+          const m = momentumRef.current
+          m.v *= 0.93
+          const next = manualRef.current + m.v * dt * 1000
+          const clamped = clamp(next)
+          manualRef.current = clamped
+          holder.style.transform = `translateY(${clamped}px)`
+          if (Math.abs(m.v) < 0.02 || clamped !== next) {
+            m.running = false
+            syncAfterManual()
           }
           raf = requestAnimationFrame(step)
           return
@@ -275,14 +272,6 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   useLayoutEffect(() => {
     setActiveLine(activeLineId)
   }, [fontSize, lineHeight, sideMargins, fontFamily, activeLineId])
-
-  useEffect(
-    () => () => {
-      if (wheelSettleRef.current) clearTimeout(wheelSettleRef.current)
-    },
-    [],
-  )
-
   const mirrorStyle = useMemo(() => {
     if (!settings.mirror) return {}
     switch (settings.mirrorAxis) {
