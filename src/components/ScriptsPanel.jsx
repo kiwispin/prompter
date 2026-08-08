@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { parseScript, secondsForWords, formatDuration } from '../lib/parser'
 
 export default function ScriptsPanel({
@@ -20,6 +20,7 @@ export default function ScriptsPanel({
   const [importText, setImportText] = useState('')
   const [renaming, setRenaming] = useState(null)
   const [nameDraft, setNameDraft] = useState('')
+  const fileInputRef = useRef(null)
 
   const activeDoc = useMemo(() => parseScript(draft), [draft])
 
@@ -32,6 +33,41 @@ export default function ScriptsPanel({
     loadScript(id)
     const s = scripts.find((x) => x.id === id)
     setDraft(s ? s.text : '')
+  }
+
+  const finishImport = (text) => {
+    if (!text.trim()) return
+    const s = importScript(text)
+    setDraft(s.text)
+    setImportText('')
+    setShowImport(false)
+    onLoadToPrompter()
+    onClose()
+  }
+
+  const handleFileImport = (e) => {
+    const file = e.target.files && e.target.files[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      finishImport(String(reader.result || ''))
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
+
+  const handleExport = () => {
+    const name = (active.name || 'script').trim()
+    const safeName = name.replace(/[^\w\- ]+/g, '').replace(/\s+/g, '_').slice(0, 60) || 'script'
+    const blob = new Blob([draft], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${safeName}.txt`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
   return (
@@ -55,6 +91,16 @@ export default function ScriptsPanel({
               <button className="btn btn-ghost" onClick={() => setShowImport((v) => !v)}>
                 Import text
               </button>
+              <button className="btn btn-ghost" onClick={() => fileInputRef.current && fileInputRef.current.click()}>
+                Import file…
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".txt,.md,text/plain"
+                style={{ display: 'none' }}
+                onChange={handleFileImport}
+              />
             </div>
 
             {showImport && (
@@ -68,28 +114,12 @@ export default function ScriptsPanel({
                   onKeyDown={(e) => {
                     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && importText.trim()) {
                       e.preventDefault()
-                      const s = importScript(importText)
-                      setDraft(s.text)
-                      setImportText('')
-                      setShowImport(false)
-                      onLoadToPrompter()
-                      onClose()
+                      finishImport(importText)
                     }
                   }}
                   autoFocus
                 />
-                <button
-                  className="btn btn-primary"
-                  disabled={!importText.trim()}
-                  onClick={() => {
-                    const s = importScript(importText)
-                    setDraft(s.text)
-                    setImportText('')
-                    setShowImport(false)
-                    onLoadToPrompter()
-                    onClose()
-                  }}
-                >
+                <button className="btn btn-primary" disabled={!importText.trim()} onClick={() => finishImport(importText)}>
                   Import
                 </button>
               </div>
@@ -169,6 +199,9 @@ export default function ScriptsPanel({
               spellCheck="true"
             />
             <div className="editor-actions">
+              <button className="btn btn-ghost" onClick={handleExport} title="Download this script as a .txt file">
+                Export…
+              </button>
               <button
                 className="btn btn-primary"
                 onClick={() => {
