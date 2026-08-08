@@ -29,6 +29,12 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   const rateRowKey = useRef(null)
   const ratePxPerWord = useRef(4)
   const prevIdxRef = useRef(-1)
+  // Mic-mode continuous flow (paced by recognition).
+  const flowRef = useRef(0)
+  const flowPaceRef = useRef(0) // words/sec
+  const prevPosRef = useRef(0)
+  const prevTRef = useRef(0)
+  const lastMoveRef = useRef(-Infinity)
 
   const { fontSize, lineHeight, sideMargins, fontFamily, matching } = settings
 
@@ -238,8 +244,37 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
           }
           if (offsetRef.current != null) holder.style.transform = `translateY(${clamp(offsetRef.current)}px)`
         } else {
+          // Mic mode: continuous flow paced by recognition, so the text keeps
+          // moving mid-screen instead of stalling between word confirmations.
+          const now = performance.now()
           const pos = positionRef.current
-          const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(pos)))
+          const sinceMove = now - lastMoveRef.current
+
+          if (pos !== prevPosRef.current) {
+            lastMoveRef.current = now
+            const gap = now - prevTRef.current
+            if (gap > 0 && gap < 3000) {
+              const inst = ((pos - prevPosRef.current) / gap) * 1000
+              flowPaceRef.current =
+                flowPaceRef.current > 0 ? 0.5 * inst + 0.5 * flowPaceRef.current : inst
+              flowPaceRef.current = Math.max(0, Math.min(flowPaceRef.current, 12))
+            } else {
+              flowPaceRef.current = 0
+            }
+            prevPosRef.current = pos
+            prevTRef.current = now
+            // Re-anchor slightly ahead of the confirmed position.
+            flowRef.current = pos + flowPaceRef.current * 0.5
+          }
+
+          if (sinceMove < 1500 && flowPaceRef.current > 0) {
+            flowRef.current += flowPaceRef.current * dt
+          } else {
+            flowPaceRef.current *= 0.9
+          }
+
+          const f = Math.max(0, Math.min(totalWords, flowRef.current))
+          const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(f)))
           let target = 0
           const el0 = holder.querySelector(`[data-wid="${idx}"]`)
           if (el0) {
@@ -247,7 +282,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
             const el1 = holder.querySelector(`[data-wid="${idx + 1}"]`)
             if (el1) {
               const c1 = el1.offsetTop + el1.offsetHeight / 2
-              cy += (pos - Math.floor(pos)) * (c1 - cy)
+              cy += (f - Math.floor(f)) * (c1 - cy)
             }
             target = eyeline - cy
           }
