@@ -7,4 +7,4 @@
 //
 // Set this to e.g. "https://prompter-token.<you>.workers.dev" after you
 // deploy worker/worker.js.
-export const TOKEN_PROXY_URL = ''
+export const TOKEN_PROXY_URL = 'https://prompter-token.kiwispin.workers.dev'
