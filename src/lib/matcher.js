@@ -1,64 +1,91 @@
-// Greedy matching of recognised speech against the script's flat word list.
+// Position-aware matching of recognized speech against the script.
 //
-// To avoid jumping forward on misrecognitions or on words that simply don't
-// appear in the script (headings, improvised lines), the cursor only advances
-// when a CONTIGUOUS run of at least MIN_RUN spoken words matches contiguous
-// script words, inside a bounded window around the current position.
-//
-// The cursor never moves backwards. The chosen run is the longest one found;
-// ties go to the furthest script position.
+// Matching is deliberately monotonic. It prefers the nearest plausible match
+// to the current cursor, which prevents repeated words later in a script from
+// winning simply because they are farther ahead.
 
-export const WINDOW_AHEAD = 40 // words we'll search ahead of the cursor
-export const WINDOW_BACK = 3 // words we may step back to re-anchor
-export const MIN_RUN = 2 // consecutive matches required to advance
+import { normalizeWord, tokenize as tokenizeText } from './text.js'
 
-export function matchTranscript(spokenWords, scriptLower, fromIndex) {
-  if (!spokenWords.length || !scriptLower.length) return -1
-  const spoken = spokenWords.filter((w) => !isFiller(w))
-  if (!spoken.length) return -1
-  const start = Math.max(0, fromIndex - WINDOW_BACK)
-  const end = Math.min(scriptLower.length - 1, fromIndex + WINDOW_AHEAD)
+export const WINDOW_AHEAD = 32
+export const WINDOW_BACK = 4
+export const MIN_RUN = 2
 
-  let bestLen = 0
-  let bestEnd = -1
+export function matchTranscript(spokenWords, scriptLower, fromIndex, options = {}) {
+  return matchTranscriptDetailed(spokenWords, scriptLower, fromIndex, options)?.end ?? -1
+}
 
-  for (let s = 0; s < spoken.length; s++) {
-    // Can't beat the current best run from here.
-    if (spoken.length - s <= bestLen) break
-    for (let j = start; j <= end; j++) {
-      if (end - j + 1 <= bestLen) continue
-      let k = 0
-      while (j + k <= end && s + k < spoken.length && scriptLower[j + k] === spoken[s + k]) {
-        k++
+export function matchTranscriptDetailed(spokenWords, scriptLower, fromIndex, options = {}) {
+  if (!spokenWords?.length || !scriptLower?.length) return null
+
+  const spoken = spokenWords
+    .map((word) => (typeof word === 'string' ? word : word.lower || word.value || ''))
+    .map((word) => normalizeWord(word))
+    .filter((word) => word && !isFiller(word))
+
+  if (!spoken.length) return null
+
+  const cursor = Math.max(0, Math.floor(fromIndex || 0))
+  const start = Math.max(0, cursor - WINDOW_BACK)
+  const lookAhead = options.final ? WINDOW_AHEAD + 12 : WINDOW_AHEAD
+  const end = Math.min(scriptLower.length - 1, cursor + lookAhead)
+  let best = null
+
+  for (let spokenStart = 0; spokenStart < spoken.length; spokenStart += 1) {
+    for (let scriptStart = start; scriptStart <= end; scriptStart += 1) {
+      let length = 0
+      while (
+        scriptStart + length <= end &&
+        spokenStart + length < spoken.length &&
+        equivalent(spoken[spokenStart + length], scriptLower[scriptStart + length])
+      ) {
+        length += 1
       }
-      if (k > bestLen || (k === bestLen && j + k - 1 > bestEnd)) {
-        bestLen = k
-        bestEnd = j + k - 1
+
+      if (length < MIN_RUN) {
+        if (!options.final || length !== 1) continue
+        const occurrences = scriptLower
+          .slice(start, end + 1)
+          .filter((word) => equivalent(spoken[spokenStart], word)).length
+        if (occurrences > 1 && scriptStart > cursor + 4) continue
+      }
+
+      const candidate = {
+        start: scriptStart,
+        end: scriptStart + length - 1,
+        length,
+        distance: Math.abs(scriptStart - cursor),
+        score: length * 100 - Math.abs(scriptStart - cursor) * 2,
+      }
+
+      if (
+        !best ||
+        candidate.score > best.score ||
+        (candidate.score === best.score && candidate.distance < best.distance)
+      ) {
+        best = candidate
       }
     }
   }
 
-  return bestLen >= MIN_RUN ? bestEnd : -1
+  return best
+}
+
+export function tokenize(transcript) {
+  return tokenizeText(transcript)
+}
+
+export function alignTranscript(spokenWords, scriptLower, fromIndex, options = {}) {
+  return matchTranscript(spokenWords, scriptLower, fromIndex, options)
 }
 
 const FILLERS = new Set(['um', 'uh', 'er', 'erm', 'hmm', 'mm', 'uhh', 'umm', 'ah'])
 
-function isFiller(w) {
-  const clean = w.replace(/[.,!?;:'"]/g, '').toLowerCase()
-  return FILLERS.has(clean)
+function isFiller(word) {
+  return FILLERS.has(String(word).replace(/[.,!?;:'”’"]+/g, '').toLowerCase())
 }
 
-// Tokenise a transcript string into lowercase, punctuation-stripped words.
-export function tokenize(transcript) {
-  const tokens = []
-  const re = /[A-Za-z0-9']+/g
-  let m
-  while ((m = re.exec(transcript)) !== null) {
-    tokens.push(m[0].toLowerCase().replace(/'$/, ''))
-  }
-  return tokens
-}
-
-export function alignTranscript(spokenWords, scriptLower, fromIndex) {
-  return matchTranscript(spokenWords, scriptLower, fromIndex)
+function equivalent(a, b) {
+  const left = String(a).replace(/[’‘]/g, "'").replace(/^'+|'+$/g, '')
+  const right = String(b).replace(/[’‘]/g, "'").replace(/^'+|'+$/g, '')
+  return left === right
 }

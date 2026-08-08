@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { LINE_TEXT, LINE_HEADING, LINE_CUE } from '../lib/parser'
+import { LINE_CUE, LINE_HEADING, LINE_TEXT } from '../lib/parser'
 
-const EYELINE_FRACTION = {
-  top: 0.18,
-  center: 0.5,
-  bottom: 0.85,
-}
-
+const EYELINE_PRESETS = { top: 0.18, center: 0.5, bottom: 0.85 }
 const FONT_STACK = {
   sans: "'Segoe UI', -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif",
   mono: "'SFMono-Regular', Consolas, 'Roboto Mono', monospace",
@@ -17,75 +12,164 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   const stageRef = useRef(null)
   const linesRef = useRef(null)
   const [activeLine, setActiveLine] = useState(-1)
-  // manualRef holds the current translateY while the user is dragging/scrolling
-  // by hand; the auto-scroll loop stands down until it's released.
   const manualRef = useRef(null)
   const dragRef = useRef(null)
-  // Authoritative scroll offset (px) shared by rate, mic and manual scrolling.
+  const clickSuppressionRef = useRef(false)
   const offsetRef = useRef(null)
-  // Momentum (px/ms) after a manual flick.
   const momentumRef = useRef({ v: 0, running: false })
-  // Rate-driven scroll cache.
-  const rateRowKey = useRef(null)
-  const ratePxPerWord = useRef(4)
-  const prevIdxRef = useRef(-1)
-  const { fontSize, lineHeight, sideMargins, fontFamily, matching } = settings
+  const previousIndexRef = useRef(-1)
+  const geometryRef = useRef({ rows: [], wordToRow: new Map(), pxPerWord: 4 })
 
-  // Voice Sync always keeps the active spoken line on the center eyeline.
-  // Reading position remains configurable for speed-scroll and demo modes.
-  const eyelineFraction = useMemo(
-    () => (mode === 'voice' && settings.source === 'mic' ? 0.5 : EYELINE_FRACTION[settings.readingPos] ?? 0.5),
-    [mode, settings.source, settings.readingPos],
-  )
+  const { fontSize, lineHeight, sideMargins, fontFamily, matching } = settings
+  const eyelineFraction = useMemo(() => {
+    if (Number.isFinite(settings.eyelinePercent)) {
+      return Math.max(0.12, Math.min(0.88, settings.eyelinePercent / 100))
+    }
+    return EYELINE_PRESETS[settings.readingPos] ?? EYELINE_PRESETS.center
+  }, [settings.eyelinePercent, settings.readingPos])
 
   const activeLineId = useMemo(() => {
     if (word < 0) return -1
-    const lineId = doc.wordLine.get(word)
-    return lineId == null ? -1 : lineId
+    return doc.wordLine.get(word) ?? -1
   }, [doc, word])
 
   useEffect(() => setActiveLine(activeLineId), [activeLineId])
 
-  const highlightEnabled = mode === 'constant' ? false : matching !== 'none'
+  const highlightEnabled = mode !== 'constant' && matching !== 'none'
 
-  const clampOffset = useCallback((holder, stage, y) => {
-    const maxScroll = holder.scrollHeight - stage.clientHeight
+  const clampOffset = useCallback((y) => {
+    const stage = stageRef.current
+    const holder = linesRef.current
+    if (!stage || !holder) return y
+    const maxScroll = Math.max(0, holder.scrollHeight - stage.clientHeight)
     return Math.max(-maxScroll, Math.min(y, stage.clientHeight))
   }, [])
 
-  // Pick the word nearest the reading line (used after manual scroll).
-  const wordAtReadingLine = useCallback(() => {
+  const currentIndex = useCallback(() => {
+    if (!totalWords) return -1
+    return Math.max(0, Math.min(totalWords - 1, Math.floor(positionRef.current)))
+  }, [positionRef, totalWords])
+
+  const targetForIndex = useCallback(
+    (index) => {
+      const stage = stageRef.current
+      const geometry = geometryRef.current
+      if (!stage || index < 0) return 0
+      const rowIndex = geometry.wordToRow.get(index)
+      const row = rowIndex == null ? null : geometry.rows[rowIndex]
+      if (!row) return 0
+      return clampOffset(stage.clientHeight * eyelineFraction - row.center)
+    },
+    [clampOffset, eyelineFraction],
+  )
+
+  const measureGeometry = useCallback(() => {
+    const holder = linesRef.current
+    if (!holder) return
+
+    const rowMap = new Map()
+    const rows = []
+    const wordEls = [...holder.querySelectorAll('[data-wid]')]
+
+    for (const el of wordEls) {
+      const index = Number(el.dataset.wid)
+      const top = el.offsetTop
+      const bottom = top + el.offsetHeight
+      let row = rows[rows.length - 1]
+
+      if (!row || Math.abs(row.top - top) > 1) {
+        row = { top, bottom, startIndex: index, endIndex: index, center: 0, pxPerWord: 4 }
+        rows.push(row)
+      } else {
+        row.bottom = Math.max(row.bottom, bottom)
+        row.endIndex = index
+      }
+
+      row.center = (row.top + row.bottom) / 2
+      rowMap.set(index, rows.length - 1)
+    }
+
+    for (let i = 0; i < rows.length; i += 1) {
+      const next = rows[i + 1]
+      const count = Math.max(1, rows[i].endIndex - rows[i].startIndex + 1)
+      rows[i].pxPerWord = next ? Math.max(1, (next.top - rows[i].top) / count) : Math.max(1, rows[i].bottom - rows[i].top)
+    }
+
+    const current = currentIndex()
+    geometryRef.current = {
+      rows,
+      wordToRow: rowMap,
+      pxPerWord: rows[rowMap.get(current)]?.pxPerWord || 4,
+    }
+
+    // Re-anchor immediately after a layout change. The next voice update will
+    // resume the normal eased movement from this valid geometry.
+    offsetRef.current = current >= 0 ? targetForIndex(current) : 0
+    if (holder) holder.style.transform = `translateY(${clampOffset(offsetRef.current)}px)`
+  }, [clampOffset, currentIndex, targetForIndex])
+
+  useLayoutEffect(() => {
+    let frame
+    const schedule = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(measureGeometry)
+    }
+
+    schedule()
     const stage = stageRef.current
     const holder = linesRef.current
-    if (!stage || !holder) return -1
-    const eyelineY = stage.getBoundingClientRect().top + stage.clientHeight * eyelineFraction
-    let best = -1
-    let bestDist = Infinity
-    for (const el of holder.querySelectorAll('[data-wid]')) {
-      const r = el.getBoundingClientRect()
-      const d = Math.abs(r.top + r.height / 2 - eyelineY)
-      if (d < bestDist) {
-        bestDist = d
-        best = Number(el.dataset.wid)
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null
+    if (observer && stage && holder) {
+      observer.observe(stage)
+      observer.observe(holder)
+    }
+
+    return () => {
+      cancelAnimationFrame(frame)
+      observer?.disconnect()
+    }
+  }, [doc, fontSize, lineHeight, sideMargins, fontFamily, measureGeometry])
+
+  useEffect(() => {
+    offsetRef.current = null
+    previousIndexRef.current = -1
+    geometryRef.current = { rows: [], wordToRow: new Map(), pxPerWord: 4 }
+  }, [doc, mode, eyelineFraction])
+
+  const wordAtReadingLine = useCallback(() => {
+    const stage = stageRef.current
+    const geometry = geometryRef.current
+    if (!stage || !geometry.rows.length) return -1
+
+    const eyeline = stage.clientHeight * eyelineFraction
+    const offset = manualRef.current ?? offsetRef.current ?? 0
+    let best = geometry.rows[0]
+    let bestDistance = Infinity
+
+    for (const row of geometry.rows) {
+      const distance = Math.abs(row.center + offset - eyeline)
+      if (distance < bestDistance) {
+        best = row
+        bestDistance = distance
       }
     }
-    return best
+
+    return best.startIndex
   }, [eyelineFraction])
 
   const syncAfterManual = useCallback(() => {
     const released = manualRef.current
     manualRef.current = null
     if (released != null) offsetRef.current = released
-    const idx = wordAtReadingLine()
-    if (idx >= 0 && onManualScroll) onManualScroll(idx)
-  }, [wordAtReadingLine, onManualScroll])
+    const index = wordAtReadingLine()
+    if (index >= 0) onManualScroll?.(index)
+  }, [onManualScroll, wordAtReadingLine])
 
   const applyManual = useCallback(
-    (dy) => {
+    (value) => {
       const holder = linesRef.current
-      const stage = stageRef.current
-      if (!holder || !stage) return dy
-      const next = clampOffset(holder, stage, dy)
+      if (!holder) return value
+      const next = clampOffset(value)
       manualRef.current = next
       holder.style.transform = `translateY(${next}px)`
       return next
@@ -93,42 +177,47 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     [clampOffset],
   )
 
-  const onPointerDown = useCallback((e) => {
-    if (e.target && e.target.closest && e.target.closest('.toolbar, .hud, .panel, .onboard, .countdown')) return
-    if (!e.isPrimary) return
+  const onPointerDown = useCallback((event) => {
+    if (event.target?.closest?.('.toolbar, .hud, .panel, .onboard, .countdown')) return
+    if (!event.isPrimary) return
+
     momentumRef.current.running = false
+    const currentOffset = offsetRef.current ?? parseManual(linesRef.current)
     dragRef.current = {
-      startY: e.clientY,
-      prevY: e.clientY,
-      prevT: performance.now(),
-      v: 0,
+      startY: event.clientY,
+      previousY: event.clientY,
+      previousTime: performance.now(),
+      velocity: 0,
       moved: false,
-      start: parseManual(linesRef.current),
+      startOffset: currentOffset,
     }
-    e.currentTarget.setPointerCapture && e.currentTarget.setPointerCapture(e.pointerId)
+    event.currentTarget.setPointerCapture?.(event.pointerId)
   }, [])
 
-  const onPointerMove = useCallback((e) => {
-    const d = dragRef.current
-    if (!d) return
-    if (!d.moved && Math.abs(e.clientY - d.startY) < 6) return
-    d.moved = true
-    const now = performance.now()
-    const dt = Math.max(8, now - d.prevT)
-    const prev = d.prevY
-    d.prevY = e.clientY
-    d.prevT = now
-    const dy = e.clientY - prev
-    d.v = dy / dt // px/ms
-    applyManual(d.start + (e.clientY - d.startY))
-  }, [applyManual])
+  const onPointerMove = useCallback(
+    (event) => {
+      const drag = dragRef.current
+      if (!drag) return
+      if (!drag.moved && Math.abs(event.clientY - drag.startY) < 6) return
+
+      drag.moved = true
+      const now = performance.now()
+      const dt = Math.max(8, now - drag.previousTime)
+      const dy = event.clientY - drag.previousY
+      drag.previousY = event.clientY
+      drag.previousTime = now
+      drag.velocity = dy / dt
+      applyManual(drag.startOffset + event.clientY - drag.startY)
+    },
+    [applyManual],
+  )
 
   const onPointerUp = useCallback(() => {
-    const d = dragRef.current
-    if (d && d.moved) {
-      // Flick detection: launch momentum if we let go while still moving fast.
-      if (Math.abs(d.v) > 0.35) {
-        momentumRef.current = { v: d.v, running: true }
+    const drag = dragRef.current
+    if (drag?.moved) {
+      clickSuppressionRef.current = true
+      if (Math.abs(drag.velocity) > 0.35) {
+        momentumRef.current = { v: drag.velocity, running: true }
       } else {
         syncAfterManual()
       }
@@ -137,151 +226,110 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   }, [syncAfterManual])
 
   const onWheel = useCallback(
-    (e) => {
-      const holder = linesRef.current
-      if (!holder) return
-      let delta = e.deltaY
-      if (e.deltaMode === 1) delta *= 16
-      // Impulse: each tick gives the text a push; friction decays it to a
-      // natural "go and slow" stop, like a hardware prompter.
-      const m = momentumRef.current
-      if (!m.running) {
-        m.running = true
-        m.v = 0
+    (event) => {
+      event.preventDefault()
+      let delta = event.deltaY
+      if (event.deltaMode === 1) delta *= 16
+
+      const momentum = momentumRef.current
+      if (!momentum.running) {
+        momentum.running = true
+        momentum.v = 0
       }
-      m.v += (-delta * 0.5) / 240 // px/ms
-      m.v = Math.max(-1.2, Math.min(1.2, m.v))
-      if (manualRef.current == null) manualRef.current = offsetRef.current != null ? offsetRef.current : 0
+      momentum.v = Math.max(-1.2, Math.min(1.2, momentum.v + (-delta * 0.5) / 240))
+      if (manualRef.current == null) manualRef.current = offsetRef.current ?? 0
     },
     [],
   )
 
-  // Scroll loop.
-  //   Speed scroll + Demo reader -> continuous rate-driven scroll (like a
-  //   hardware prompter): the text glides up at a steady pixel rate.
-  //   Microphone mode -> pins the active spoken line to the center eyeline and
-  //   eases between recognition bursts.
-  //   Manual drag / wheel -> direct control with momentum on release.
-  //   offsetRef is the single source of truth for the scroll position, so a
-  //   manual release never snaps back to the auto position.
+  const onLineClick = useCallback(
+    (event) => {
+      if (clickSuppressionRef.current) {
+        clickSuppressionRef.current = false
+        return
+      }
+      const start = Number(event.currentTarget.dataset.startIndex)
+      if (Number.isFinite(start) && start >= 0) onManualScroll?.(start)
+    },
+    [onManualScroll],
+  )
+
   useEffect(() => {
     let raf
     let last = performance.now()
-    const ease = 0.25
+    const tau = 0.36
 
-    const step = () => {
+    const step = (now) => {
       const stage = stageRef.current
       const holder = linesRef.current
+      const dt = Math.min(0.1, Math.max(0, (now - last) / 1000))
+      last = now
+
       if (stage && holder) {
-        const now = performance.now()
-        const dt = Math.min(0.1, (now - last) / 1000)
-        last = now
-        const eyeline = stage.clientHeight * eyelineFraction
-        const maxScroll = holder.scrollHeight - stage.clientHeight
-        const clamp = (y) => Math.max(-maxScroll, Math.min(y, stage.clientHeight))
-
-        // Momentum after a flick.
-        if (momentumRef.current.running) {
-          const m = momentumRef.current
-          m.v *= 0.94
-          const next = manualRef.current + m.v * dt * 1000
-          const clamped = clamp(next)
+        const momentum = momentumRef.current
+        if (momentum.running) {
+          momentum.v *= Math.pow(0.93, dt * 60)
+          const next = (manualRef.current ?? offsetRef.current ?? 0) + momentum.v * dt * 1000
+          const clamped = clampOffset(next)
           manualRef.current = clamped
           holder.style.transform = `translateY(${clamped}px)`
-          if (Math.abs(m.v) < 0.04 || clamped !== next) {
-            m.running = false
+
+          if (Math.abs(momentum.v) < 0.02 || clamped !== next) {
+            momentum.running = false
             syncAfterManual()
           }
-          raf = requestAnimationFrame(step)
-          return
-        }
+        } else if (manualRef.current == null) {
+          const index = currentIndex()
+          const previousIndex = previousIndexRef.current
+          if (previousIndex > index && mode === 'constant') offsetRef.current = null
+          previousIndexRef.current = index
 
-        // Momentum / inertia (drag flick + wheel impulse): "go and slow".
-        if (momentumRef.current.running) {
-          const m = momentumRef.current
-          m.v *= 0.93
-          const next = manualRef.current + m.v * dt * 1000
-          const clamped = clamp(next)
-          manualRef.current = clamped
-          holder.style.transform = `translateY(${clamped}px)`
-          if (Math.abs(m.v) < 0.02 || clamped !== next) {
-            m.running = false
-            syncAfterManual()
-          }
-          raf = requestAnimationFrame(step)
-          return
-        }
-
-        // User has hold of the text; keep their position.
-        if (manualRef.current != null) {
-          raf = requestAnimationFrame(step)
-          return
-        }
-
-        const isRate = mode === 'constant' || (mode === 'voice' && settings.source === 'demo')
-
-        if (isRate) {
-          const pos = positionRef.current
-          const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(pos)))
-          if (prevIdxRef.current > idx) offsetRef.current = null // restart / moved back
-          prevIdxRef.current = idx
-
-          const el0 = holder.querySelector(`[data-wid="${idx}"]`)
-          if (offsetRef.current == null && el0) {
-            offsetRef.current = eyeline - (el0.offsetTop + el0.offsetHeight / 2)
-          }
-          if (el0) {
-            const rowTop = el0.offsetTop
-            if (rateRowKey.current !== rowTop) {
-              rateRowKey.current = rowTop
-              ratePxPerWord.current = measureRowPxPerWord(holder, idx)
+          if (mode === 'constant') {
+            if (offsetRef.current == null) offsetRef.current = targetForIndex(index)
+            const pxPerWord = geometryRef.current.pxPerWord || 4
+            if (running && settings.baselineWpm > 0) {
+              offsetRef.current -= (settings.baselineWpm / 60) * pxPerWord * dt
             }
-          }
-          if (running && ratePxPerWord.current && settings.baselineWpm > 0) {
-            offsetRef.current -= (settings.baselineWpm / 60) * ratePxPerWord.current * dt
-          }
-          if (offsetRef.current != null) holder.style.transform = `translateY(${clamp(offsetRef.current)}px)`
-        } else {
-          // Mic mode: anchor the rendered row containing the recognised word.
-          // offsetTop is the visual row position for inline words, so the row
-          // stays centered while words advance and moves when text wraps.
-          const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(positionRef.current)))
-          const wordEl = holder.querySelector(`[data-wid="${idx}"]`)
-          let target = wordEl ? eyeline - (wordEl.offsetTop + wordEl.offsetHeight / 2) : 0
-          target = clamp(target)
-          if (offsetRef.current == null) {
-            offsetRef.current = target
           } else {
-            offsetRef.current += (target - offsetRef.current) * ease
-            if (Math.abs(target - offsetRef.current) < 0.5) offsetRef.current = target
+            if (offsetRef.current == null) offsetRef.current = targetForIndex(index)
+            const target = targetForIndex(index)
+            const alpha = 1 - Math.exp(-dt / tau)
+            const distance = target - offsetRef.current
+            const maxStep = 260 * dt
+            const stepDistance = Math.max(-maxStep, Math.min(maxStep, distance * alpha))
+            offsetRef.current += stepDistance
+            if (Math.abs(target - offsetRef.current) < 0.35) offsetRef.current = target
           }
-          holder.style.transform = `translateY(${clamp(offsetRef.current)}px)`
+
+          holder.style.transform = `translateY(${clampOffset(offsetRef.current ?? 0)}px)`
         }
       }
+
       raf = requestAnimationFrame(step)
     }
+
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eyelineFraction, settings.source, doc, mode, positionRef, totalWords, running, syncAfterManual])
+  }, [clampOffset, currentIndex, mode, running, settings.baselineWpm, syncAfterManual, targetForIndex])
 
-  // Force a re-measure pass when display settings change.
-  useLayoutEffect(() => {
-    setActiveLine(activeLineId)
-  }, [fontSize, lineHeight, sideMargins, fontFamily, activeLineId])
   const mirrorStyle = useMemo(() => {
     if (!settings.mirror) return {}
-    switch (settings.mirrorAxis) {
-      case 'h':
-        return { transform: 'scaleX(-1)' }
-      case 'v':
-        return { transform: 'scaleY(-1)' }
-      case 'both':
-        return { transform: 'scale(-1, -1)' }
-      default:
-        return {}
-    }
+    if (settings.mirrorAxis === 'h') return { transform: 'scaleX(-1)' }
+    if (settings.mirrorAxis === 'v') return { transform: 'scaleY(-1)' }
+    if (settings.mirrorAxis === 'both') return { transform: 'scale(-1, -1)' }
+    return {}
   }, [settings.mirror, settings.mirrorAxis])
+
+  const stageStyle = {
+    '--font-size': `${fontSize}px`,
+    '--line-height': lineHeight,
+    '--side-margin': `${sideMargins}%`,
+    '--font': FONT_STACK[fontFamily] || FONT_STACK.sans,
+  }
+
+  const linesStyle = {
+    '--bottom-space': `${Math.max(12, (1 - eyelineFraction) * 100)}vh`,
+  }
 
   const isLineHighlighted = useCallback(
     (line) => highlightEnabled && matching === 'line' && line.type === LINE_TEXT && line.id === activeLine,
@@ -297,53 +345,36 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       onWheel={onWheel}
-      style={{
-        '--font-size': `${fontSize}px`,
-        '--line-height': lineHeight,
-        '--side-margin': `${sideMargins}%`,
-        '--font': FONT_STACK[fontFamily] || FONT_STACK.sans,
-      }}
+      style={stageStyle}
     >
       <div className="prompter-mirror" style={mirrorStyle}>
-        <div className="prompter-lines" ref={linesRef}>
-          {doc.lines.map((line, i) => {
+        <div className="prompter-lines" ref={linesRef} style={linesStyle}>
+          {doc.lines.map((line, lineIndex) => {
             const lineActive = isLineHighlighted(line)
             return (
               <div
-                key={line.type === LINE_TEXT ? line.id : `h-${i}`}
+                key={line.type === LINE_TEXT ? line.id : `line-${lineIndex}`}
                 data-line={line.type === LINE_TEXT ? line.id : undefined}
+                data-start-index={line.type === LINE_TEXT ? line.startIndex : undefined}
                 className={`pline pline-${line.type}${lineActive ? ' pline-active' : ''}`}
+                onClick={line.type === LINE_TEXT ? onLineClick : undefined}
               >
                 {line.type === LINE_TEXT ? (
-                  line.parts.map((part, pi) =>
+                  line.parts.map((part, partIndex) =>
                     part.kind === 'cue' ? (
-                      <span key={`c${pi}`} className="pcue-inline">
+                      <span key={`cue-${partIndex}`} className="pcue-inline">
                         [{part.text}]
                       </span>
                     ) : (
-                      part.words.map((w) => (
-                        <span
-                          key={w.index}
-                          data-wid={w.index}
-                          className={[
-                            'pword',
-                            highlightEnabled && w.index < word ? 'pword-read' : '',
-                            highlightEnabled && matching === 'word' && w.index === word ? 'pword-current' : '',
-                          ]
-                            .filter(Boolean)
-                            .join(' ')}
-                        >
-                          {w.word}{' '}
-                        </span>
-                      ))
+                      renderTextPart(part, word, highlightEnabled, matching, `part-${partIndex}`)
                     ),
                   )
                 ) : line.type === LINE_HEADING ? (
                   <span className="pheading-text">{line.text}</span>
                 ) : line.type === LINE_CUE && settings.showCues ? (
-                  line.cues.map((c, ci) => (
-                    <span key={ci} className="pcue-text">
-                      {ci > 0 ? ' ' : ''}[{c}]
+                  line.cues.map((cue, cueIndex) => (
+                    <span key={cueIndex} className="pcue-text">
+                      {cueIndex > 0 ? ' ' : ''}[{cue}]
                     </span>
                   ))
                 ) : null}
@@ -357,43 +388,43 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   )
 }
 
-function parseManual(holder) {
-  if (!holder) return 0
-  const t = holder.style.transform
-  const m = t && /translateY\((-?[\d.]+)px\)/.exec(t)
-  return m ? parseFloat(m[1]) : 0
+function renderTextPart(part, currentWord, highlightEnabled, matching, keyPrefix) {
+  const nodes = []
+  let cursor = 0
+
+  for (const word of part.words) {
+    if (word.start > cursor) nodes.push(<span key={`${keyPrefix}-text-${cursor}`}>{part.text.slice(cursor, word.start)}</span>)
+
+    const classes = [
+      'pword',
+      highlightEnabled && word.index < currentWord ? 'pword-read' : '',
+      highlightEnabled && matching === 'word' && word.index === currentWord ? 'pword-current' : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
+
+    nodes.push(
+      <span key={word.index} data-wid={word.index} className={classes}>
+        {part.text.slice(word.start, word.end)}
+      </span>,
+    )
+    cursor = word.end
+  }
+
+  if (cursor < part.text.length) nodes.push(<span key={`${keyPrefix}-text-${cursor}`}>{part.text.slice(cursor)}</span>)
+  return nodes
 }
 
-// Pixels scrolled per word for the visual row containing word `idx`:
-// (distance to the next row) / (words on this row).
-function measureRowPxPerWord(holder, idx) {
-  const el0 = holder.querySelector(`[data-wid="${idx}"]`)
-  if (!el0) return 4
-  const rowTop = el0.offsetTop
-  // scan backward to the start of this row
-  let start = idx
-  while (start > 0) {
-    const p = holder.querySelector(`[data-wid="${start - 1}"]`)
-    if (!p || p.offsetTop !== rowTop) break
-    start--
-  }
-  // scan forward to the last word of this row
-  let end = idx
-  while (end < holder.querySelectorAll('[data-wid]').length - 1) {
-    const w = holder.querySelector(`[data-wid="${end}"]`)
-    const w2 = holder.querySelector(`[data-wid="${end + 1}"]`)
-    if (!w2 || w2.offsetTop !== w.offsetTop) break
-    end++
-  }
-  const next = holder.querySelector(`[data-wid="${end + 1}"]`)
-  if (!next) return 4
-  const words = end - start + 1
-  return words > 0 ? (next.offsetTop - rowTop) / words : 4
+function parseManual(holder) {
+  const transform = holder?.style.transform || ''
+  const match = /translateY\((-?[\d.]+)px\)/.exec(transform)
+  return match ? parseFloat(match[1]) : 0
 }
 
 function EyelineIndicator({ kind, fraction }) {
   if (!kind || kind === 'none') return null
   const top = `${fraction * 100}%`
+
   if (kind === 'arrow') {
     return (
       <div className="eyeline eyeline-arrow" style={{ top }}>
@@ -401,11 +432,7 @@ function EyelineIndicator({ kind, fraction }) {
       </div>
     )
   }
-  if (kind === 'line') {
-    return <div className="eyeline eyeline-line" style={{ top }} />
-  }
-  if (kind === 'band') {
-    return <div className="eyeline eyeline-band" style={{ top }} />
-  }
+  if (kind === 'line') return <div className="eyeline eyeline-line" style={{ top }} />
+  if (kind === 'band') return <div className="eyeline eyeline-band" style={{ top }} />
   return null
 }

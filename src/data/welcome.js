@@ -1,6 +1,3 @@
-import { useCallback, useState } from 'react'
-import { load, save, remove, KEYS } from '../lib/storage'
-
 export const WELCOME_SCRIPT = `# Welcome to Prompter
 
 ## The words move when you speak.

@@ -53,6 +53,27 @@ body {
   touch-action: none;
 }
 
+.prompter-stage::before,
+.prompter-stage::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 18vh;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.prompter-stage::before {
+  top: 0;
+  background: linear-gradient(180deg, rgba(11, 14, 20, 0.96), rgba(11, 14, 20, 0));
+}
+
+.prompter-stage::after {
+  bottom: 0;
+  background: linear-gradient(0deg, rgba(11, 14, 20, 0.98), rgba(11, 14, 20, 0));
+}
+
 .prompter-mirror {
   position: absolute;
   inset: 0;
@@ -65,7 +86,7 @@ body {
   width: calc(100% - var(--side-margin) * 2);
   will-change: transform;
   padding-top: calc(var(--toolbar-h) + env(safe-area-inset-top) + 28px);
-  padding-bottom: 45vh;
+  padding-bottom: calc(var(--bottom-space) + var(--font-size));
 }
 
 .pline {
@@ -109,10 +130,8 @@ body {
 }
 
 .pword-current {
-  background: var(--accent);
-  color: #06281a;
-  border-radius: 5px;
-  padding: 0 2px;
+  color: var(--amber);
+  font-weight: 700;
 }
 
 .pheading-text {
@@ -181,7 +200,7 @@ body {
   gap: 6px;
   padding: 6px 10px;
   margin-top: 10px;
-  background: rgba(15, 20, 31, 0.82);
+  background: rgba(15, 20, 31, 0.74);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border);
@@ -271,13 +290,13 @@ body {
   left: 50%;
   transform: translateX(-50%);
   bottom: calc(env(safe-area-inset-bottom) + 14px);
-  width: min(560px, calc(100vw - 24px));
-  background: rgba(15, 20, 31, 0.82);
+  width: min(520px, calc(100vw - 24px));
+  background: rgba(15, 20, 31, 0.72);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 10px 14px 12px;
+  padding: 8px 12px 10px;
   z-index: 20;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
 }
@@ -286,6 +305,10 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 8px;
+}
+
+.hud-live {
+  opacity: 0.82;
 }
 
 .hud-statusbar {

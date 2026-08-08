@@ -74,19 +74,18 @@ export default function SettingsPanel({ settings, setSetting, resetSettings, spe
 
         <Toggle label="Auto-loop" checked={settings.autoLoop} onChange={(v) => setSetting('autoLoop', v)} hint="Restart from the top when the script ends." />
 
-        <Segmented
-          label="Reading position"
-          options={[
-            { value: 'top', label: 'Top' },
-            { value: 'center', label: 'Center' },
-            { value: 'bottom', label: 'Bottom' },
-          ]}
-          value={settings.readingPos}
-          onChange={(v) => setSetting('readingPos', v)}
+        <Slider
+          label="Eyeline position"
+          value={settings.eyelinePercent}
+          min={18}
+          max={85}
+          step={1}
+          suffix="%"
+          onChange={(v) => setSetting('eyelinePercent', v)}
         />
         <div className="panel-hint">
           {settings.mode === 'voice' && settings.source === 'mic'
-            ? 'Voice Sync keeps the active spoken line centered automatically.'
+            ? 'Voice Sync keeps the active rendered row at this eyeline.'
             : 'Choose where the reading line sits during speed scroll or the demo reader.'}
         </div>
       </Section>

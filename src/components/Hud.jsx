@@ -58,7 +58,7 @@ export default function Hud({ stats, phase, settings, voiceStatus, lastTranscrip
           <div className="hud-stats">
             <div className="hud-stat">
               <span className="hud-label">WPM</span>
-              <span className="hud-value">{settings.baselineWpm}</span>
+              <span className="hud-value">{stats.wpm || settings.baselineWpm}</span>
             </div>
             <div className="hud-stat">
               <span className="hud-label">Elapsed</span>

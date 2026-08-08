@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS = {
   baselineWpm: 150,
   autoLoop: false,
   readingPos: 'center', // 'top' | 'center' | 'bottom'
+  eyelinePercent: 50,
   matching: 'word', // 'none' | 'word' | 'line'
   voiceCommands: true,
   tokenProxyUrl: TOKEN_PROXY_URL,
@@ -29,6 +30,9 @@ function migrate(stored) {
   if (typeof s.highlight === 'boolean') {
     if (!s.highlight && s.matching !== 'none') s.matching = 'none'
     delete s.highlight
+  }
+  if (!Number.isFinite(s.eyelinePercent)) {
+    s.eyelinePercent = { top: 18, center: 50, bottom: 85 }[s.readingPos] ?? DEFAULT_SETTINGS.eyelinePercent
   }
   return s
 }

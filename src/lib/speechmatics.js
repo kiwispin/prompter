@@ -87,6 +87,7 @@ export class SpeechmaticsClient {
     this.ws = null
     this.started = false
     this.lastSeqNo = 0
+    this.closedError = null
   }
 
   get state() {
@@ -99,6 +100,8 @@ export class SpeechmaticsClient {
 
   async start() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return
+    this.closedError = null
+    this.lastSeqNo = 0
     this.onStatus('authenticating')
 
     let jwt
@@ -160,13 +163,29 @@ export class SpeechmaticsClient {
 
   waitForStart() {
     return new Promise((resolve, reject) => {
+      let finished = false
+      const timeout = setTimeout(() => {
+        if (finished) return
+        finished = true
+        reject(new Error('Timed out waiting for recognition to start'))
+      }, 15000)
       const check = () => {
-        if (this.started) return resolve()
-        if (this.closedError) return reject(this.closedError)
+        if (finished) return
+        if (this.started) {
+          finished = true
+          clearTimeout(timeout)
+          resolve()
+          return
+        }
+        if (this.closedError) {
+          finished = true
+          clearTimeout(timeout)
+          reject(this.closedError)
+          return
+        }
         setTimeout(check, 100)
       }
       check()
-      setTimeout(() => reject(new Error('Timed out waiting for recognition to start')), 15000)
     })
   }
 
@@ -209,6 +228,7 @@ export class SpeechmaticsClient {
   handleClose(ev) {
     if (!this.closedError && ev.code && ev.code !== 1000) {
       this.closedError = new Error(`Connection closed (${ev.code})`)
+      this.onError(this.closedError)
     }
     this.started = false
     this.onStatus('closed')

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { parseScript } from '../lib/parser'
-import { matchTranscript, tokenize } from '../lib/matcher'
+import { matchTranscriptDetailed, tokenize } from '../lib/matcher'
 import { detectCommand } from '../lib/commands'
 import { SpeechmaticsClient } from '../lib/speechmatics'
 import { startMic } from '../lib/mic'
@@ -38,7 +38,7 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
   const [error, setError] = useState(null)
   const [notice, setNoticeState] = useState(null)
   const [lastTranscript, setLastTranscript] = useState('')
-  const [stats, setStats] = useState({ elapsed: 0, remaining: 0, progress: 0, wordsRead: 0 })
+  const [stats, setStats] = useState({ elapsed: 0, remaining: 0, progress: 0, wordsRead: 0, wpm: 0 })
 
   const elapsedRef = useRef(0)
   const sessionRef = useRef(null)
@@ -48,6 +48,8 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
   const lastTranscriptAtRef = useRef(0)
   const lastAdvanceAtRef = useRef(0)
   const voiceStatusRef = useRef('off')
+  const pendingMatchRef = useRef(null)
+  const wakeLockRef = useRef(null)
 
   const flashNotice = useCallback((msg) => {
     setNoticeState(msg)
@@ -80,7 +82,7 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
     elapsedRef.current = 0
     setWord(-1)
     setPhase(PHASE.IDLE)
-    setStats({ elapsed: 0, remaining: 0, progress: 0, wordsRead: 0 })
+    setStats({ elapsed: 0, remaining: (totalWords / (settings.baselineWpm || 150)) * 60, progress: 0, wordsRead: 0, wpm: 0 })
     setError(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [raw])
@@ -95,16 +97,48 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
 
   const refreshStats = useCallback(() => {
     const pos = positionRef.current
-    const wpm = engine.current.baselineWpm || 150
+    const baselineWpm = engine.current.baselineWpm || 150
     const wordsRead = Math.max(0, Math.min(totalWords, Math.floor(pos)))
     const remaining = Math.max(0, totalWords - wordsRead)
+    const measuredWpm = elapsedRef.current > 1 && wordsRead > 0 ? (wordsRead / elapsedRef.current) * 60 : 0
+    const wpm = engine.current.mode === 'voice' && engine.current.source === 'mic' && measuredWpm > 0 ? measuredWpm : baselineWpm
     setStats({
       elapsed: elapsedRef.current,
       remaining: (remaining / wpm) * 60,
       progress: totalWords ? wordsRead / totalWords : 0,
       wordsRead,
+      wpm: Math.round(wpm),
     })
   }, [totalWords])
+
+  // Keep the screen awake during a rehearsal where the browser supports it.
+  useEffect(() => {
+    if (phase !== PHASE.RUNNING || typeof navigator === 'undefined' || !navigator.wakeLock) return undefined
+
+    let cancelled = false
+    const requestWakeLock = async () => {
+      try {
+        const lock = await navigator.wakeLock.request('screen')
+        if (cancelled) await lock.release()
+        else wakeLockRef.current = lock
+      } catch {
+        // Wake Lock is optional; the rehearsal continues without it.
+      }
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !wakeLockRef.current) requestWakeLock()
+    }
+
+    requestWakeLock()
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      cancelled = true
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      const lock = wakeLockRef.current
+      wakeLockRef.current = null
+      lock?.release().catch(() => {})
+    }
+  }, [phase])
 
   const handleEnd = useCallback(() => {
     if (phaseRef.current !== PHASE.RUNNING) return
@@ -160,7 +194,7 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
         let vs = 'off'
         if (settings.source === 'mic') {
           if (micStatus === 'error' || sttStatus === 'error') vs = 'error'
-          else if (micStatus !== 'live') vs = 'starting'
+          else if (micStatus !== 'live' || sttStatus !== 'recording') vs = 'starting'
           else if (now - lastTranscriptAtRef.current > 2200) vs = 'waiting'
           else if (now - lastAdvanceAtRef.current > 1500) vs = 'offscript'
           else vs = 'listening'
@@ -179,6 +213,8 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
     positionRef.current = 0
     wordRef.current = -1
     elapsedRef.current = 0
+    pendingMatchRef.current = null
+    lastAdvanceAtRef.current = Date.now()
     setWord(-1)
   }, [])
 
@@ -204,11 +240,14 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
     const s = sessionRef.current
     if (s) {
       s.mic && s.mic.stop()
+      s.client && s.client.stop()
       s.client && s.client.close()
       sessionRef.current = null
     }
     setMicStatus('off')
     setSttStatus('off')
+    voiceStatusRef.current = 'off'
+    setVoiceStatus('off')
   }
 
   function beginRestart(withCountdown) {
@@ -220,7 +259,7 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
     }
   }
 
-  const applyTranscript = useCallback((t) => {
+  const applyTranscript = useCallback((t, { final = false } = {}) => {
     if (engine.current.voiceCommands !== false) {
       const cmd = detectCommand(t)
       if (cmd === 'rewind') {
@@ -228,6 +267,7 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
         positionRef.current = 0
         wordRef.current = -1
         elapsedRef.current = 0
+        pendingMatchRef.current = null
         lastAdvanceAtRef.current = Date.now()
         setWord(-1)
         if (phaseRef.current !== PHASE.RUNNING) setPhase(PHASE.IDLE)
@@ -241,19 +281,29 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
     const scriptLower = scriptLowerRef.current
     const doc = docRef.current
     const from = Math.max(0, Math.floor(positionRef.current))
-    const m = matchTranscript(spoken, scriptLower, from)
-    if (m < 0) return
+    const match = matchTranscriptDetailed(spoken, scriptLower, from, { final })
+    if (!match) {
+      if (final) pendingMatchRef.current = null
+      return
+    }
+
+    const candidateKey = `${match.start}:${match.end}`
+    const pending = pendingMatchRef.current
+    const candidateCount = pending && pending.key === candidateKey ? pending.count + 1 : 1
+    pendingMatchRef.current = { key: candidateKey, count: candidateCount }
+
+    // Partials are useful for responsiveness but should not move the page on
+    // one ambiguous word. Final results, longer runs, or repeated partials are
+    // strong enough evidence to commit.
+    const shouldCommit = final || match.length >= 3 || candidateCount >= 2
+    if (!shouldCommit) return
+
     const e = engine.current
-    let target = m + 1
+    let target = match.end + 1
     if (e.matching === 'line') {
-      const line = doc.wordLine.get(m)
-      if (line == null) return
-      const lineObj = doc.lines.find((l) => l.id === line)
-      if (!lineObj) return
-      // Only hop to the next line once we're on it; stay locked otherwise.
-      const curLine = doc.wordLine.get(Math.max(0, Math.floor(positionRef.current)))
-      if (curLine === line) return
-      target = lineObj.endIndex + 1
+      const sentenceId = doc.wordSentence.get(match.end)
+      const sentence = doc.sentences.find((item) => item.id === sentenceId)
+      if (sentence) target = sentence.endIndex + 1
     }
     if (target > positionRef.current) {
       positionRef.current = target
@@ -276,12 +326,12 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
       onPartial: (t) => {
         lastTranscriptAtRef.current = Date.now()
         setLastTranscript(t)
-        applyTranscript(t)
+        applyTranscript(t, { final: false })
       },
       onFinal: (t) => {
         lastTranscriptAtRef.current = Date.now()
         setLastTranscript(t)
-        applyTranscript(t)
+        applyTranscript(t, { final: true })
       },
       onStatus: (st) => setSttStatus(st),
       onError: (err) => {
@@ -291,11 +341,28 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
     })
 
     let mic
+    let clientReady = false
+    const pendingAudio = []
     try {
       setMicStatus('connecting')
-      mic = await startMic((pcm) => client.sendAudio(pcm), (st) => setMicStatus(st === 'live' ? 'live' : 'off'))
+      voiceStatusRef.current = 'starting'
+      setVoiceStatus('starting')
+      lastTranscriptAtRef.current = Date.now()
+      lastAdvanceAtRef.current = Date.now()
+      mic = await startMic(
+        (pcm) => {
+          if (clientReady) {
+            client.sendAudio(pcm)
+          } else if (pendingAudio.length < 10) {
+            pendingAudio.push(new Int16Array(pcm))
+          }
+        },
+        (st) => setMicStatus(st === 'live' ? 'live' : 'off'),
+      )
       sessionRef.current = { mic, client }
       await client.start()
+      clientReady = true
+      pendingAudio.splice(0).forEach((pcm) => client.sendAudio(pcm))
     } catch (err) {
       setError(`${err.message || 'Could not start microphone'} — switched to the Demo reader.`)
       setMicStatus('error')
@@ -376,6 +443,7 @@ export function usePrompter({ raw, settings, speechmaticsKey, onSourceFallback }
       positionRef.current = i
       wordRef.current = i
       elapsedRef.current = 0
+      pendingMatchRef.current = null
       lastAdvanceAtRef.current = Date.now()
       if (phaseRef.current === PHASE.COUNTDOWN) {
         setCount(0)

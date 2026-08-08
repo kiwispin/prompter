@@ -1,27 +1,25 @@
 // Parses a script into display lines with word-level tracking metadata.
 //
-// Line types:
-//   'heading'  — starts with `#` (or `##` etc). Displayed, never read/tracked.
-//   'cue'      — a line made up entirely of [brackets] (one or many). Displayed
-//                as a direction, ignored by tracking.
-//   'text'     — spoken content. Inline [brackets] are shown as cues but never
-//                tracked. Its words are tracked.
-//
-// Words across text lines form a single flat list; each word knows its global
-// index and which line it belongs to.
+// The original source text is preserved for rendering. Words are tracked in a
+// separate flat index, so punctuation and whitespace remain visible without
+// affecting recognition or scroll state.
+
+import { hasSentenceBoundary, tokenizeWithRanges } from './text.js'
 
 export const LINE_TEXT = 'text'
 export const LINE_HEADING = 'heading'
 export const LINE_CUE = 'cue'
 export const LINE_BLANK = 'blank'
 
-const WORD_RE = /[\w'’\u2019-]+/g
 const BRACKET_RE = /\[[^\]]*\]/g
 
 export function parseScript(raw) {
   const lines = []
   const words = []
+  const wordSentence = new Map()
+  const sentences = []
   let textLineId = 0
+  let sentenceId = 0
 
   const srcLines = String(raw || '').split(/\r\n|\r|\n/)
 
@@ -41,52 +39,82 @@ export function parseScript(raw) {
       continue
     }
 
-    // Split the line into cue segments and spoken text segments.
     const parts = []
     let cursor = 0
     let match
+    BRACKET_RE.lastIndex = 0
+
     while ((match = BRACKET_RE.exec(trimmed)) !== null) {
       const before = trimmed.slice(cursor, match.index)
-      if (before.trim()) {
-        parts.push({ kind: 'text', text: before, words: [] })
-      }
+      if (before.trim()) parts.push({ kind: 'text', text: before, words: [] })
       parts.push({ kind: 'cue', text: match[0].slice(1, -1).trim(), words: [] })
       cursor = match.index + match[0].length
     }
+
     const after = trimmed.slice(cursor)
-    if (after.trim()) {
-      parts.push({ kind: 'text', text: after, words: [] })
-    }
+    if (after.trim()) parts.push({ kind: 'text', text: after, words: [] })
 
-    const cueParts = parts.filter((p) => p.kind === 'cue')
-    const textParts = parts.filter((p) => p.kind === 'text')
+    const cueParts = parts.filter((part) => part.kind === 'cue')
+    const textParts = parts.filter((part) => part.kind === 'text')
 
-    // A line that is only brackets is a stage cue.
     if (textParts.length === 0 && cueParts.length > 0) {
       lines.push({
         type: LINE_CUE,
         text: trimmed,
-        cues: cueParts.map((p) => p.text),
+        cues: cueParts.map((part) => part.text),
         words: [],
       })
       continue
     }
 
-    // Otherwise it's spoken content; collect tracked words from text parts.
     const lineWords = []
+    let lineHasBoundary = false
+
     for (const part of textParts) {
-      let wmatch
-      while ((wmatch = WORD_RE.exec(part.text)) !== null) {
-        const w = {
+      const tokens = tokenizeWithRanges(part.text)
+      part.words = []
+
+      for (let i = 0; i < tokens.length; i += 1) {
+        const token = tokens[i]
+        const word = {
           index: words.length,
           lineId: textLineId,
-          word: wmatch[0],
-          lower: wmatch[0].toLowerCase(),
+          sentenceId,
+          word: token.value,
+          lower: token.lower,
+          start: token.start,
+          end: token.end,
         }
-        part.words.push(w)
-        lineWords.push(w)
-        words.push(w)
+        words.push(word)
+        lineWords.push(word)
+        wordSentence.set(word.index, sentenceId)
+        part.words.push(word)
+
+        const nextStart = tokens[i + 1]?.start ?? part.text.length
+        if (hasSentenceBoundary(part.text.slice(tokens[i].end, nextStart))) {
+          lineHasBoundary = true
+          sentenceId += 1
+        }
       }
+    }
+
+    if (lineWords.length) {
+      for (const word of lineWords) {
+        const existing = sentences[word.sentenceId]
+        if (existing) {
+          existing.endIndex = word.index
+        } else {
+          sentences[word.sentenceId] = {
+            id: word.sentenceId,
+            startIndex: word.index,
+            endIndex: word.index,
+          }
+        }
+      }
+
+      // Source lines are useful authoring boundaries even when a line has no
+      // terminal punctuation. Do not merge the next paragraph into this one.
+      if (!lineHasBoundary) sentenceId += 1
     }
 
     lines.push({
@@ -97,35 +125,37 @@ export function parseScript(raw) {
       id: textLineId,
       startIndex: lineWords.length ? lineWords[0].index : -1,
       endIndex: lineWords.length ? lineWords[lineWords.length - 1].index : -1,
+      sentenceStart: lineWords.length ? lineWords[0].sentenceId : -1,
+      sentenceEnd: lineWords.length ? lineWords[lineWords.length - 1].sentenceId : -1,
     })
-    textLineId++
+    textLineId += 1
   }
 
   return {
     raw,
     lines,
     words,
+    sentences: sentences.filter(Boolean),
     totalWords: words.length,
-    // Flat lookup from global word index -> line id
     wordLine: buildWordLineLookup(words),
+    wordSentence,
   }
 }
 
 function buildWordLineLookup(words) {
   const map = new Map()
-  for (const w of words) map.set(w.index, w.lineId)
+  for (const word of words) map.set(word.index, word.lineId)
   return map
 }
 
-// Estimated reading time in seconds for a chunk of words at wpm.
 export function secondsForWords(count, wpm) {
   if (!wpm || wpm <= 0) return 0
   return (count / wpm) * 60
 }
 
 export function formatDuration(totalSeconds) {
-  const s = Math.max(0, Math.round(totalSeconds))
-  const m = Math.floor(s / 60)
-  const r = s % 60
-  return `${m}:${String(r).padStart(2, '0')}`
+  const seconds = Math.max(0, Math.round(totalSeconds))
+  const minutes = Math.floor(seconds / 60)
+  const remainder = seconds % 60
+  return `${minutes}:${String(remainder).padStart(2, '0')}`
 }
