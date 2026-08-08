@@ -242,15 +242,12 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
           }
           if (offsetRef.current != null) holder.style.transform = `translateY(${clamp(offsetRef.current)}px)`
         } else {
-          // Mic mode: anchor the complete line containing the recognised word.
-          // This prevents the line from drifting as partial transcripts arrive
-          // and only moves the page when speech reaches a new line.
+          // Mic mode: anchor the rendered row containing the recognised word.
+          // offsetTop is the visual row position for inline words, so the row
+          // stays centered while words advance and moves when text wraps.
           const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(positionRef.current)))
-          const lineId = doc.wordLine.get(idx)
-          const lineEl = lineId == null ? null : holder.querySelector(`[data-line="${lineId}"]`)
           const wordEl = holder.querySelector(`[data-wid="${idx}"]`)
-          const activeEl = lineEl || wordEl
-          let target = activeEl ? eyeline - (activeEl.offsetTop + activeEl.offsetHeight / 2) : 0
+          let target = wordEl ? eyeline - (wordEl.offsetTop + wordEl.offsetHeight / 2) : 0
           target = clamp(target)
           if (offsetRef.current == null) {
             offsetRef.current = target
