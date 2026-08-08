@@ -3,7 +3,7 @@ import { LINE_TEXT, LINE_HEADING, LINE_CUE } from '../lib/parser'
 
 const EYELINE_FRACTION = {
   top: 0.18,
-  center: 0.55,
+  center: 0.5,
   bottom: 0.85,
 }
 
@@ -29,14 +29,14 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   const rateRowKey = useRef(null)
   const ratePxPerWord = useRef(4)
   const prevIdxRef = useRef(-1)
-  // Mic-mode continuous flow (paced by recognition).
-  const flowRef = useRef(0)
-  const flowPaceRef = useRef(0) // words/sec
-  const prevPosRef = useRef(0)
-  const prevTRef = useRef(0)
-  const lastMoveRef = useRef(-Infinity)
-
   const { fontSize, lineHeight, sideMargins, fontFamily, matching } = settings
+
+  // Voice Sync always keeps the active spoken line on the center eyeline.
+  // Reading position remains configurable for speed-scroll and demo modes.
+  const eyelineFraction = useMemo(
+    () => (mode === 'voice' && settings.source === 'mic' ? 0.5 : EYELINE_FRACTION[settings.readingPos] ?? 0.5),
+    [mode, settings.source, settings.readingPos],
+  )
 
   const activeLineId = useMemo(() => {
     if (word < 0) return -1
@@ -58,8 +58,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     const stage = stageRef.current
     const holder = linesRef.current
     if (!stage || !holder) return -1
-    const frac = EYELINE_FRACTION[settings.readingPos] ?? 0.5
-    const eyelineY = stage.getBoundingClientRect().top + stage.clientHeight * frac
+    const eyelineY = stage.getBoundingClientRect().top + stage.clientHeight * eyelineFraction
     let best = -1
     let bestDist = Infinity
     for (const el of holder.querySelectorAll('[data-wid]')) {
@@ -71,7 +70,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       }
     }
     return best
-  }, [settings.readingPos])
+  }, [eyelineFraction])
 
   const syncAfterManual = useCallback(() => {
     const released = manualRef.current
@@ -160,7 +159,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   // Scroll loop.
   //   Speed scroll + Demo reader -> continuous rate-driven scroll (like a
   //   hardware prompter): the text glides up at a steady pixel rate.
-  //   Microphone mode -> pins the word you're on at the reading line and
+  //   Microphone mode -> pins the active spoken line to the center eyeline and
   //   eases between recognition bursts.
   //   Manual drag / wheel -> direct control with momentum on release.
   //   offsetRef is the single source of truth for the scroll position, so a
@@ -177,8 +176,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
         const now = performance.now()
         const dt = Math.min(0.1, (now - last) / 1000)
         last = now
-        const frac = EYELINE_FRACTION[settings.readingPos] ?? 0.5
-        const eyeline = stage.clientHeight * frac
+        const eyeline = stage.clientHeight * eyelineFraction
         const maxScroll = holder.scrollHeight - stage.clientHeight
         const clamp = (y) => Math.max(-maxScroll, Math.min(y, stage.clientHeight))
 
@@ -244,48 +242,15 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
           }
           if (offsetRef.current != null) holder.style.transform = `translateY(${clamp(offsetRef.current)}px)`
         } else {
-          // Mic mode: continuous flow paced by recognition, so the text keeps
-          // moving mid-screen instead of stalling between word confirmations.
-          const now = performance.now()
-          const pos = positionRef.current
-          const sinceMove = now - lastMoveRef.current
-
-          if (pos !== prevPosRef.current) {
-            lastMoveRef.current = now
-            const gap = now - prevTRef.current
-            if (gap > 0 && gap < 3000) {
-              const inst = ((pos - prevPosRef.current) / gap) * 1000
-              flowPaceRef.current =
-                flowPaceRef.current > 0 ? 0.5 * inst + 0.5 * flowPaceRef.current : inst
-              flowPaceRef.current = Math.max(0, Math.min(flowPaceRef.current, 12))
-            } else {
-              flowPaceRef.current = 0
-            }
-            prevPosRef.current = pos
-            prevTRef.current = now
-            // Re-anchor slightly ahead of the confirmed position.
-            flowRef.current = pos + flowPaceRef.current * 0.5
-          }
-
-          if (sinceMove < 1500 && flowPaceRef.current > 0) {
-            flowRef.current += flowPaceRef.current * dt
-          } else {
-            flowPaceRef.current *= 0.9
-          }
-
-          const f = Math.max(0, Math.min(totalWords, flowRef.current))
-          const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(f)))
-          let target = 0
-          const el0 = holder.querySelector(`[data-wid="${idx}"]`)
-          if (el0) {
-            let cy = el0.offsetTop + el0.offsetHeight / 2
-            const el1 = holder.querySelector(`[data-wid="${idx + 1}"]`)
-            if (el1) {
-              const c1 = el1.offsetTop + el1.offsetHeight / 2
-              cy += (f - Math.floor(f)) * (c1 - cy)
-            }
-            target = eyeline - cy
-          }
+          // Mic mode: anchor the complete line containing the recognised word.
+          // This prevents the line from drifting as partial transcripts arrive
+          // and only moves the page when speech reaches a new line.
+          const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(positionRef.current)))
+          const lineId = doc.wordLine.get(idx)
+          const lineEl = lineId == null ? null : holder.querySelector(`[data-line="${lineId}"]`)
+          const wordEl = holder.querySelector(`[data-wid="${idx}"]`)
+          const activeEl = lineEl || wordEl
+          let target = activeEl ? eyeline - (activeEl.offsetTop + activeEl.offsetHeight / 2) : 0
           target = clamp(target)
           if (offsetRef.current == null) {
             offsetRef.current = target
@@ -301,7 +266,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.readingPos, settings.source, doc, mode, positionRef, totalWords, running, syncAfterManual])
+  }, [eyelineFraction, settings.source, doc, mode, positionRef, totalWords, running, syncAfterManual])
 
   // Force a re-measure pass when display settings change.
   useLayoutEffect(() => {
@@ -390,7 +355,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
           })}
         </div>
       </div>
-      <EyelineIndicator kind={settings.eyeline} fraction={EYELINE_FRACTION[settings.readingPos] ?? 0.5} />
+      <EyelineIndicator kind={settings.eyeline} fraction={eyelineFraction} />
     </div>
   )
 }

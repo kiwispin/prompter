@@ -84,6 +84,11 @@ export default function SettingsPanel({ settings, setSetting, resetSettings, spe
           value={settings.readingPos}
           onChange={(v) => setSetting('readingPos', v)}
         />
+        <div className="panel-hint">
+          {settings.mode === 'voice' && settings.source === 'mic'
+            ? 'Voice Sync keeps the active spoken line centered automatically.'
+            : 'Choose where the reading line sits during speed scroll or the demo reader.'}
+        </div>
       </Section>
 
       <Section title="Matching">
