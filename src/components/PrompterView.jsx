@@ -22,8 +22,12 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   const manualRef = useRef(null)
   const dragRef = useRef(null)
   const wheelTimerRef = useRef(null)
-  // Rate-driven scroll state (Speed/Demo modes).
-  const ratePosRef = useRef(null)
+  const wheelDeltaRef = useRef(0)
+  // Authoritative scroll offset (px) shared by rate, mic and manual scrolling.
+  const offsetRef = useRef(null)
+  // Momentum (px/ms) after a manual flick.
+  const momentumRef = useRef({ v: 0, running: false })
+  // Rate-driven scroll cache.
   const rateRowKey = useRef(null)
   const ratePxPerWord = useRef(4)
   const prevIdxRef = useRef(-1)
@@ -66,7 +70,9 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   }, [settings.readingPos])
 
   const syncAfterManual = useCallback(() => {
+    const released = manualRef.current
     manualRef.current = null
+    if (released != null) offsetRef.current = released
     const idx = wordAtReadingLine()
     if (idx >= 0 && onManualScroll) onManualScroll(idx)
   }, [wordAtReadingLine, onManualScroll])
@@ -75,10 +81,11 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     (dy) => {
       const holder = linesRef.current
       const stage = stageRef.current
-      if (!holder || !stage) return
+      if (!holder || !stage) return dy
       const next = clampOffset(holder, stage, dy)
       manualRef.current = next
       holder.style.transform = `translateY(${next}px)`
+      return next
     },
     [clampOffset],
   )
@@ -86,7 +93,15 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   const onPointerDown = useCallback((e) => {
     if (e.target && e.target.closest && e.target.closest('.toolbar, .hud, .panel, .onboard, .countdown')) return
     if (!e.isPrimary) return
-    dragRef.current = { startY: e.clientY, moved: false, start: parseManual(linesRef.current) }
+    momentumRef.current.running = false
+    dragRef.current = {
+      startY: e.clientY,
+      prevY: e.clientY,
+      prevT: performance.now(),
+      v: 0,
+      moved: false,
+      start: parseManual(linesRef.current),
+    }
     e.currentTarget.setPointerCapture && e.currentTarget.setPointerCapture(e.pointerId)
   }, [])
 
@@ -95,11 +110,26 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     if (!d) return
     if (!d.moved && Math.abs(e.clientY - d.startY) < 6) return
     d.moved = true
+    const now = performance.now()
+    const dt = Math.max(8, now - d.prevT)
+    const prev = d.prevY
+    d.prevY = e.clientY
+    d.prevT = now
+    const dy = e.clientY - prev
+    d.v = dy / dt // px/ms
     applyManual(d.start + (e.clientY - d.startY))
   }, [applyManual])
 
   const onPointerUp = useCallback(() => {
-    if (dragRef.current && dragRef.current.moved) syncAfterManual()
+    const d = dragRef.current
+    if (d && d.moved) {
+      // Flick detection: launch momentum if we let go while still moving fast.
+      if (Math.abs(d.v) > 0.35) {
+        momentumRef.current = { v: d.v, running: true }
+      } else {
+        syncAfterManual()
+      }
+    }
     dragRef.current = null
   }, [syncAfterManual])
 
@@ -109,33 +139,37 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       if (!holder) return
       const current = parseManual(holder)
       applyManual(current - e.deltaY)
+      wheelDeltaRef.current = e.deltaY
       if (wheelTimerRef.current) clearTimeout(wheelTimerRef.current)
-      wheelTimerRef.current = setTimeout(syncAfterManual, 200)
+      wheelTimerRef.current = setTimeout(() => {
+        const delta = wheelDeltaRef.current
+        if (Math.abs(delta) > 12) {
+          momentumRef.current = { v: -delta / 16, running: true }
+        } else {
+          syncAfterManual()
+        }
+      }, 120)
     },
     [applyManual, syncAfterManual],
   )
 
   // Scroll loop.
   //   Speed scroll + Demo reader -> continuous rate-driven scroll (like a
-  //   hardware prompter): the text glides up at a steady pixel rate derived
-  //   from the WPM, so motion is perfectly smooth with no row-by-row steps.
+  //   hardware prompter): the text glides up at a steady pixel rate.
   //   Microphone mode -> pins the word you're on at the reading line and
   //   eases between recognition bursts.
+  //   Manual drag / wheel -> direct control with momentum on release.
+  //   offsetRef is the single source of truth for the scroll position, so a
+  //   manual release never snaps back to the auto position.
   useEffect(() => {
     let raf
     let last = performance.now()
-    let current = 0 // eased position (mic mode)
     const ease = 0.25
 
     const step = () => {
       const stage = stageRef.current
       const holder = linesRef.current
       if (stage && holder) {
-        if (manualRef.current != null) {
-          last = performance.now()
-          raf = requestAnimationFrame(step)
-          return
-        }
         const now = performance.now()
         const dt = Math.min(0.1, (now - last) / 1000)
         last = now
@@ -144,22 +178,40 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
         const maxScroll = holder.scrollHeight - stage.clientHeight
         const clamp = (y) => Math.max(-maxScroll, Math.min(y, stage.clientHeight))
 
+        // Momentum after a flick.
+        if (momentumRef.current.running) {
+          const m = momentumRef.current
+          m.v *= 0.94
+          const next = manualRef.current + m.v * dt * 1000
+          const clamped = clamp(next)
+          manualRef.current = clamped
+          holder.style.transform = `translateY(${clamped}px)`
+          if (Math.abs(m.v) < 0.04 || clamped !== next) {
+            m.running = false
+            syncAfterManual()
+          }
+          raf = requestAnimationFrame(step)
+          return
+        }
+
+        // User has hold of the text; keep their position.
+        if (manualRef.current != null) {
+          raf = requestAnimationFrame(step)
+          return
+        }
+
         const isRate = mode === 'constant' || (mode === 'voice' && settings.source === 'demo')
 
         if (isRate) {
-          // Continuous rate-driven scroll.
           const pos = positionRef.current
           const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(pos)))
-          // Restart/nudge backwards: re-anchor to the pinned top of the word.
-          if (prevIdxRef.current > idx) ratePosRef.current = null
+          if (prevIdxRef.current > idx) offsetRef.current = null // restart / moved back
           prevIdxRef.current = idx
 
           const el0 = holder.querySelector(`[data-wid="${idx}"]`)
-          if (ratePosRef.current == null && el0) {
-            ratePosRef.current = eyeline - (el0.offsetTop + el0.offsetHeight / 2)
+          if (offsetRef.current == null && el0) {
+            offsetRef.current = eyeline - (el0.offsetTop + el0.offsetHeight / 2)
           }
-
-          // Measure px-per-word for the current visual row (cached per row).
           if (el0) {
             const rowTop = el0.offsetTop
             if (rateRowKey.current !== rowTop) {
@@ -167,15 +219,11 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
               ratePxPerWord.current = measureRowPxPerWord(holder, idx)
             }
           }
-
           if (running && ratePxPerWord.current && settings.baselineWpm > 0) {
-            ratePosRef.current -= (settings.baselineWpm / 60) * ratePxPerWord.current * dt
+            offsetRef.current -= (settings.baselineWpm / 60) * ratePxPerWord.current * dt
           }
-          if (ratePosRef.current != null) {
-            holder.style.transform = `translateY(${clamp(ratePosRef.current)}px)`
-          }
+          if (offsetRef.current != null) holder.style.transform = `translateY(${clamp(offsetRef.current)}px)`
         } else {
-          // Mic mode: pin the current word at the reading line.
           const pos = positionRef.current
           const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(pos)))
           let target = 0
@@ -190,9 +238,13 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
             target = eyeline - cy
           }
           target = clamp(target)
-          current += (target - current) * ease
-          if (Math.abs(target - current) < 0.5) current = target
-          holder.style.transform = `translateY(${clamp(current)}px)`
+          if (offsetRef.current == null) {
+            offsetRef.current = target
+          } else {
+            offsetRef.current += (target - offsetRef.current) * ease
+            if (Math.abs(target - offsetRef.current) < 0.5) offsetRef.current = target
+          }
+          holder.style.transform = `translateY(${clamp(offsetRef.current)}px)`
         }
       }
       raf = requestAnimationFrame(step)
@@ -200,7 +252,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.readingPos, settings.source, doc, mode, positionRef, totalWords, running])
+  }, [settings.readingPos, settings.source, doc, mode, positionRef, totalWords, running, syncAfterManual])
 
   // Force a re-measure pass when display settings change.
   useLayoutEffect(() => {
