@@ -30,13 +30,13 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
 
   const highlightEnabled = mode === 'constant' ? false : matching !== 'none'
 
-  // Scroll loop.
-  //   constant mode -> continuous glide driven by the smooth float position.
-  //   voice/demo    -> anchored to the active line's center, eased glide.
+  // Scroll loop. Tracks the continuous float position so the text glides
+  // smoothly through each line. Microphone mode eases between recognition
+  // bursts; demo/constant track exactly since their position is already smooth.
   useEffect(() => {
     let raf
     let current = 0
-    const ease = 0.22
+    const ease = 0.25
 
     const step = () => {
       const stage = stageRef.current
@@ -44,43 +44,33 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       if (stage && holder) {
         const frac = EYELINE_FRACTION[settings.readingPos] ?? 0.5
         const eyeline = stage.clientHeight * frac
+        const pos = positionRef.current
         let target = 0
 
-        if (mode === 'constant') {
-          const pos = positionRef.current
-          const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(pos)))
-          const lineId = doc.wordLine.get(idx)
-          const el = lineId != null ? holder.querySelector(`[data-line="${lineId}"]`) : holder.querySelector('[data-line]')
-          if (el) {
-            const lineObj = lineId != null ? doc.lines.find((l) => l.id === lineId) : null
-            let cy = el.offsetTop + el.offsetHeight / 2
-            const next = nextTextLineEl(holder, Number(el.dataset.line))
-            if (next && lineObj && lineObj.words.length) {
-              const fracLine = Math.max(0, Math.min(1, (pos - lineObj.startIndex) / lineObj.words.length))
-              const nextC = next.offsetTop + next.offsetHeight / 2
-              cy = cy + fracLine * (nextC - cy)
-            }
-            target = eyeline - cy
+        const idx = Math.max(0, Math.min(totalWords - 1, Math.floor(pos)))
+        const lineId = doc.wordLine.get(idx)
+        const el = lineId != null ? holder.querySelector(`[data-line="${lineId}"]`) : holder.querySelector('[data-line]')
+        if (el) {
+          const lineObj = lineId != null ? doc.lines.find((l) => l.id === lineId) : null
+          let cy = el.offsetTop + el.offsetHeight / 2
+          const next = nextTextLineEl(holder, Number(el.dataset.line))
+          if (next && lineObj && lineObj.words.length) {
+            const fracLine = Math.max(0, Math.min(1, (pos - lineObj.startIndex) / lineObj.words.length))
+            const nextC = next.offsetTop + next.offsetHeight / 2
+            cy = cy + fracLine * (nextC - cy)
           }
-          // No easing: the position float moves every frame, so tracking it
-          // directly gives a perfectly steady, continuous scroll.
-          current = target
-        } else {
-          if (activeLine >= 0) {
-            const el = holder.querySelector(`[data-line="${activeLine}"]`)
-            if (el) target = eyeline - (el.offsetTop + el.offsetHeight / 2)
-          } else {
-            const first = holder.querySelector('[data-line]')
-            if (first) target = eyeline - (first.offsetTop + first.offsetHeight / 2)
-          }
-          const maxScroll = holder.scrollHeight - stage.clientHeight
-          target = Math.max(-maxScroll, Math.min(target, stage.clientHeight))
-          current += (target - current) * ease
-          if (Math.abs(target - current) < 0.5) current = target
+          target = eyeline - cy
         }
 
         const maxScroll = holder.scrollHeight - stage.clientHeight
         target = Math.max(-maxScroll, Math.min(target, stage.clientHeight))
+
+        if (mode === 'voice' && settings.source === 'mic') {
+          current += (target - current) * ease
+          if (Math.abs(target - current) < 0.5) current = target
+        } else {
+          current = target
+        }
         current = Math.max(-maxScroll, Math.min(current, stage.clientHeight))
         holder.style.transform = `translateY(${current}px)`
       }
@@ -88,7 +78,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     }
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
-  }, [settings.readingPos, activeLine, doc, mode, positionRef, totalWords])
+  }, [settings.readingPos, settings.source, doc, mode, positionRef, totalWords])
 
   // Force a re-measure pass when display settings change.
   useLayoutEffect(() => {
