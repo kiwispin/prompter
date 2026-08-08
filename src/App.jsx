@@ -43,7 +43,7 @@ export default function App() {
     setTimeout(() => prompter.start(), 120)
   }, [dismissOnboarding, prompter, setSetting])
 
-  // After saving a key, go straight to microphone tracking.
+  // After saving a key, select microphone mode so the next start uses it.
   const useMicrophone = useCallback(() => {
     setSetting('mode', 'voice')
     setSetting('source', 'mic')
@@ -111,6 +111,12 @@ export default function App() {
     }
   }
 
+  const loadAndStart = useCallback(() => {
+    // Reset first so a script loaded while paused or running begins cleanly.
+    prompter.nudge(0)
+    setTimeout(() => prompter.start(), 0)
+  }, [prompter.nudge, prompter.start])
+
   return (
     <div ref={rootRef} className={`app${chromeHidden ? ' chrome-hidden' : ''}`}>
       <PrompterView doc={prompter.doc} word={prompter.word} positionRef={prompter.positionRef} totalWords={prompter.totalWords} mode={settings.mode} settings={settings} onManualScroll={prompter.setPosition} running={running} />
@@ -128,6 +134,7 @@ export default function App() {
             onOpenScripts={() => setShowScripts(true)}
             onToggleFullscreen={toggleFullscreen}
             micStatus={prompter.micStatus}
+            voiceStatus={prompter.voiceStatus}
             mode={settings.mode}
             source={settings.source}
           />
@@ -178,6 +185,7 @@ export default function App() {
           onLoadToPrompter={() => {
             prompter.nudge(0)
           }}
+          onLoadAndStart={loadAndStart}
           onClose={() => setShowScripts(false)}
         />
       )}

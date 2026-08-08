@@ -11,32 +11,43 @@ export default function Toolbar({
   onOpenScripts,
   onToggleFullscreen,
   micStatus,
+  voiceStatus,
   mode,
   source,
 }) {
+  const voiceLabel = {
+    off: 'Mic off',
+    starting: 'Starting mic...',
+    listening: 'Listening',
+    waiting: 'Waiting for your voice',
+    offscript: 'Off-script - holding',
+    error: 'Mic error',
+  }[voiceStatus] || (micStatus === 'live' ? 'Listening' : 'Mic off')
+
+  const voiceClass =
+    voiceStatus === 'error'
+      ? 'chip-error'
+      : voiceStatus === 'waiting' || voiceStatus === 'offscript'
+        ? 'chip-paused'
+        : voiceStatus === 'listening'
+          ? 'chip-live'
+          : 'chip-off'
+
   return (
     <div className="toolbar">
       <div className="toolbar-left">
-        <button className="iconbtn" onClick={onToggle} title="Play/Pause (Space)" aria-label={running ? 'Pause' : 'Play'}>
-          {running ? <Icon name="pause" /> : <Icon name="play" />}
-        </button>
-        <button className="iconbtn" onClick={onRestart} title="Restart (R)" aria-label="Restart">
-          <Icon name="restart" />
-        </button>
+        <ToolbarButton icon={running ? 'pause' : 'play'} label={running ? 'Pause' : 'Play'} title="Play/Pause (Space)" onClick={onToggle} />
+        <ToolbarButton icon="restart" label="Restart" title="Restart (R)" onClick={onRestart} />
         <span className="toolbar-divider" />
-        <button className="iconbtn" onClick={() => onNudge(-3)} title="Back a few words (↑)" aria-label="Back">
-          <Icon name="back" />
-        </button>
-        <button className="iconbtn" onClick={() => onNudge(3)} title="Skip a few words (↓)" aria-label="Skip">
-          <Icon name="forward" />
-        </button>
+        <ToolbarButton icon="back" label="Back" title="Back a few words (Arrow Up)" onClick={() => onNudge(-3)} />
+        <ToolbarButton icon="forward" label="Skip" title="Skip a few words (Arrow Down)" onClick={() => onNudge(3)} />
       </div>
 
       <div className="toolbar-center">
         <span className="toolbar-title">{activeName}</span>
         {mode === 'voice' && source === 'mic' && (
-          <span className={`chip chip-sm ${micStatus === 'live' ? 'chip-demo' : 'chip-paused'}`}>
-            {micStatus === 'live' ? '● Listening' : 'Mic off'}
+          <span className={`chip chip-sm toolbar-voice-chip ${voiceClass}`} aria-live="polite">
+            {voiceLabel}
           </span>
         )}
         {phase === PHASE.PAUSED && <span className="chip chip-sm chip-paused">Paused</span>}
@@ -44,17 +55,20 @@ export default function Toolbar({
       </div>
 
       <div className="toolbar-right">
-        <button className="iconbtn" onClick={onToggleFullscreen} title="Fullscreen (F)" aria-label="Fullscreen">
-          <Icon name="fullscreen" />
-        </button>
-        <button className="iconbtn" onClick={onOpenScripts} title="Scripts" aria-label="Scripts">
-          <Icon name="script" />
-        </button>
-        <button className="iconbtn" onClick={onOpenSettings} title="Settings (S)" aria-label="Settings">
-          <Icon name="gear" />
-        </button>
+        <ToolbarButton icon="fullscreen" label="Fullscreen" title="Fullscreen (F)" onClick={onToggleFullscreen} />
+        <ToolbarButton icon="script" label="Scripts" title="Scripts" onClick={onOpenScripts} />
+        <ToolbarButton icon="gear" label="Settings" title="Settings (S)" onClick={onOpenSettings} />
       </div>
     </div>
+  )
+}
+
+function ToolbarButton({ icon, label, title, onClick }) {
+  return (
+    <button className="iconbtn toolbar-btn" onClick={onClick} title={title} aria-label={label}>
+      <Icon name={icon} />
+      <span className="toolbar-btn-label">{label}</span>
+    </button>
   )
 }
 
@@ -76,7 +90,7 @@ function Icon({ name }) {
   }
   return (
     <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
-      {paths[name]}
+      {name === 'play' ? paths.play : name === 'pause' ? paths.pause : paths[name]}
     </svg>
   )
 }

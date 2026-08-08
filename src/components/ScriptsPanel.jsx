@@ -13,6 +13,7 @@ export default function ScriptsPanel({
   importScript,
   baselineWpm,
   onLoadToPrompter,
+  onLoadAndStart,
   onClose,
 }) {
   const [draft, setDraft] = useState(active.text)
@@ -205,11 +206,11 @@ export default function ScriptsPanel({
               <button
                 className="btn btn-primary"
                 onClick={() => {
-                  onLoadToPrompter()
+                  onLoadAndStart()
                   onClose()
                 }}
               >
-                Load to prompter
+                Load &amp; start
               </button>
             </div>
           </div>

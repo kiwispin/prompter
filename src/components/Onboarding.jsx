@@ -18,40 +18,38 @@ export default function Onboarding({ speechmaticsKey, saveSpeechmaticsKey, onDon
           autoKey ? (
             <>
               <div className="onboard-brand">Prompter</div>
-              <h1 className="onboard-title">Ready to prompt.</h1>
+              <h1 className="onboard-title">A teleprompter that follows you.</h1>
               <p className="onboard-sub">
-                Your Speechmatics access is already configured for this site — no key needed on any device.
-                Pick up the mic and read, or watch the demo first.
+                Read naturally — pause, breathe, or go off-script. It waits when you do. Your microphone is ready;
+                start a rehearsal or try the demo first.
               </p>
               <div className="onboard-actions">
                 <button className="btn btn-primary btn-lg" onClick={onSaveKey}>
-                  Start with microphone
+                  Use microphone
                 </button>
                 <button className="btn btn-ghost btn-lg" onClick={onWatchDemo}>
-                  Watch the demo
+                  Try the demo
                 </button>
               </div>
-              <p className="onboard-note">
-                If you'd rather test without the mic first, the <b>Demo reader</b> needs nothing.
-              </p>
+              <p className="onboard-note">The demo needs no microphone and runs entirely in the browser.</p>
             </>
           ) : (
             <>
               <div className="onboard-brand">Prompter</div>
-              <h1 className="onboard-title">The words move when you speak.</h1>
+              <h1 className="onboard-title">A teleprompter that follows you.</h1>
               <p className="onboard-sub">
-                Read your script out loud and it scrolls with you. Pause, and it waits. Works on iPad, Windows and Mac — all in the browser.
+                Read naturally — pause, breathe, or go off-script. It waits when you do. Works on iPad, Windows and Mac.
               </p>
               <div className="onboard-actions">
                 <button className="btn btn-primary btn-lg" onClick={() => setStep(1)}>
-                  Add my free key
+                  Connect my microphone
                 </button>
                 <button className="btn btn-ghost btn-lg" onClick={() => finish(true)}>
-                  Watch the demo
+                  Try the demo
                 </button>
               </div>
               <p className="onboard-note">
-                Want to try it first? The <b>Demo reader</b> needs no key — a fake voice reads the script so you can see how it moves.
+                The <b>Demo reader</b> needs no key — use it to see how the prompter moves before connecting your mic.
               </p>
             </>
           )
@@ -60,9 +58,9 @@ export default function Onboarding({ speechmaticsKey, saveSpeechmaticsKey, onDon
         {step === 1 && (
           <>
             <div className="onboard-step">One quick step</div>
-            <h1 className="onboard-title">Add your free key so the app can hear you</h1>
+            <h1 className="onboard-title">Connect your microphone</h1>
             <p className="onboard-sub">
-              To follow your voice, the app sends what you say to <b>Speechmatics</b>. You need a free key from them first — it takes about a minute to get. Paste it below.
+              Paste a free Speechmatics key so the prompter can follow your voice. It takes about a minute to get.
             </p>
             <input
               type="password"

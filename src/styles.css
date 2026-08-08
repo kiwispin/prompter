@@ -236,6 +236,25 @@ body {
   transition: background 0.15s ease, color 0.15s ease;
 }
 
+.toolbar-btn {
+  width: auto;
+  min-width: 44px;
+  padding: 0 10px;
+  gap: 6px;
+}
+
+.toolbar-btn-label {
+  display: none;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.toolbar-voice-chip {
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .iconbtn:hover {
   background: var(--panel2);
 }
@@ -267,6 +286,54 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 8px;
+}
+
+.hud-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  margin-bottom: 8px;
+}
+
+.hud-status-main {
+  min-width: 0;
+}
+
+.chip-status {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.hud-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hud-toggle:hover {
+  background: var(--panel2);
+  color: var(--text);
+}
+
+.hud-compact {
+  width: auto;
+  min-width: 190px;
+  padding: 6px 10px;
+}
+
+.hud-compact .hud-statusbar {
+  margin-bottom: 0;
 }
 
 .hud-stat {
@@ -1030,5 +1097,39 @@ body {
 @media (max-height: 480px) {
   .hud {
     display: none;
+  }
+}
+
+@media (min-width: 900px) {
+  .toolbar-btn-label {
+    display: inline;
+  }
+
+  .toolbar-btn {
+    border-radius: 9px;
+  }
+}
+
+@media (max-width: 540px) {
+  .toolbar-voice-chip {
+    display: none;
+  }
+
+  .hud {
+    padding: 8px 10px 10px;
+  }
+
+  .hud-statusbar {
+    margin-bottom: 6px;
+  }
+
+  .hud-statusbar .chip-status {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .hud-compact {
+    min-width: 0;
   }
 }
