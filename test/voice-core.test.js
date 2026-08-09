@@ -3,6 +3,20 @@ import assert from 'node:assert/strict'
 import { ScriptAligner, ALIGNER_STATE, similarityRatio } from '../src/lib/aligner.js'
 import { StreamingResampler } from '../src/lib/mic.js'
 import { buildStartRecognition, getTempKey, wordsFrom } from '../src/lib/speechmatics.js'
+import { offsetForRail, railAnchorForRows, readingRailGap } from '../src/lib/prompterGeometry.js'
+
+test('reading rail is anchored inside the measured ink gap', () => {
+  const gap = readingRailGap(48)
+  const row = { inkBottom: 344.3 }
+  const nextRow = { inkTop: 359.2 }
+  const anchor = railAnchorForRows(row, nextRow, gap)
+  const offset = offsetForRail(360, anchor, 0)
+  assert.equal(gap, 5)
+  assert.equal(anchor, 349.3)
+  assert.equal(anchor + offset, 360)
+  assert.ok(anchor > row.inkBottom)
+  assert.ok(anchor + 2 < nextRow.inkTop)
+})
 
 test('Speechmatics start message uses the supported enhanced-model field', () => {
   const message = buildStartRecognition({ additionalVocab: ['Promptmatics'] })

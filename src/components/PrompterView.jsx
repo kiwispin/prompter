@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { LINE_CUE, LINE_HEADING, LINE_TEXT } from '../lib/parser'
+import { offsetForRail, railAnchorForRows, readingRailGap } from '../lib/prompterGeometry'
 
 const EYELINE_PRESETS = { top: 0.18, center: 0.5, bottom: 0.85 }
 const FONT_STACK = {
@@ -21,7 +22,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   const geometryRef = useRef({ rows: [], wordToRow: new Map() })
 
   const { fontSize, lineHeight, sideMargins, fontFamily, matching } = settings
-  const readingLead = fontSize * lineHeight * 0.62
+  const railGap = readingRailGap(fontSize)
   const eyelineFraction = useMemo(() => {
     if (Number.isFinite(settings.eyelinePercent)) {
       return Math.max(0.12, Math.min(0.88, settings.eyelinePercent / 100))
@@ -57,9 +58,10 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       const rowIndex = geometry.wordToRow.get(index)
       const row = rowIndex == null ? null : geometry.rows[rowIndex]
       if (!row) return 0
-      return clampOffset(stage.clientHeight * eyelineFraction - row.center - readingLead)
+      const railAnchor = railAnchorForRows(row, geometry.rows[rowIndex + 1], railGap)
+      return clampOffset(offsetForRail(stage.clientHeight * eyelineFraction, railAnchor, 0))
     },
-    [clampOffset, eyelineFraction, readingLead],
+    [clampOffset, eyelineFraction, railGap],
   )
 
   const targetForPosition = useCallback(
@@ -74,18 +76,19 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       if (!row) return targetForIndex(index)
 
       const next = geometry.rows[rowIndex + 1] || row
-      const rowDistance = Math.abs(next.center - row.center)
+      const railAnchor = railAnchorForRows(row, geometry.rows[rowIndex + 1], railGap)
+      const nextAnchor = railAnchorForRows(next, geometry.rows[rowIndex + 2], railGap)
+      const rowDistance = Math.abs(nextAnchor - railAnchor)
       const transitionWords = Math.min(
         Math.max(1, row.endIndex - row.startIndex + 1),
         Math.max(1, Math.ceil(rowDistance / Math.max(1, fontSize * lineHeight))),
       )
       const transitionStart = row.endIndex - transitionWords + 1
       const progress = Math.max(0, Math.min(1, (position - transitionStart) / transitionWords))
-      const nextCenter = next.center
-      const contentCenter = row.center + (nextCenter - row.center) * progress
-      return clampOffset(stage.clientHeight * eyelineFraction - contentCenter - readingLead)
+      const contentAnchor = railAnchor + (nextAnchor - railAnchor) * progress
+      return clampOffset(offsetForRail(stage.clientHeight * eyelineFraction, contentAnchor, 0))
     },
-    [clampOffset, eyelineFraction, fontSize, lineHeight, readingLead, targetForIndex, totalWords],
+    [clampOffset, eyelineFraction, fontSize, lineHeight, railGap, targetForIndex, totalWords],
   )
 
   const measureGeometry = useCallback(() => {
@@ -98,18 +101,26 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     for (const el of wordEls) {
       const index = Number(el.dataset.wid)
       const top = el.offsetTop
-      const bottom = top + el.offsetHeight
+      const elementRect = el.getBoundingClientRect()
+      const bottom = top + elementRect.height
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      const textRect = range.getBoundingClientRect()
+      const scale = elementRect.height > 0 ? (bottom - top) / elementRect.height : 1
+      const inkTop = top + (textRect.top - elementRect.top) * scale
+      const inkBottom = top + (textRect.bottom - elementRect.top) * scale
+      range.detach?.()
       let row = rows[rows.length - 1]
 
       if (!row || Math.abs(row.top - top) > 1) {
-        row = { top, bottom, startIndex: index, endIndex: index, center: 0 }
+        row = { top, bottom, inkTop, inkBottom, startIndex: index, endIndex: index }
         rows.push(row)
       } else {
         row.bottom = Math.max(row.bottom, bottom)
+        row.inkTop = Math.min(row.inkTop, inkTop)
+        row.inkBottom = Math.max(row.inkBottom, inkBottom)
         row.endIndex = index
       }
-
-      row.center = (row.top + row.bottom) / 2
       rowMap.set(index, rows.length - 1)
     }
 
@@ -138,6 +149,13 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     }
 
     schedule()
+    const fontSet = document.fonts
+    fontSet?.ready?.then(schedule).catch(() => {})
+    fontSet?.addEventListener?.('loadingdone', schedule)
+    // Older Safari builds could resolve fonts.ready before the first module's
+    // web font had fully affected layout. These follow-up measurements are
+    // cheap and keep the rail correct on a cold load as well as a cached one.
+    const fontChecks = [150, 600, 1800].map((delay) => setTimeout(schedule, delay))
     const stage = stageRef.current
     const holder = linesRef.current
     const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null
@@ -148,6 +166,8 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
 
     return () => {
       cancelAnimationFrame(frame)
+      fontChecks.forEach(clearTimeout)
+      fontSet?.removeEventListener?.('loadingdone', schedule)
       observer?.disconnect()
     }
   }, [doc, fontSize, lineHeight, sideMargins, fontFamily, mode, eyelineFraction, measureGeometry])
@@ -162,8 +182,10 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     let best = geometry.rows[0]
     let bestDistance = Infinity
 
-    for (const row of geometry.rows) {
-      const distance = Math.abs(row.center + readingLead + offset - eyeline)
+    for (let rowIndex = 0; rowIndex < geometry.rows.length; rowIndex += 1) {
+      const row = geometry.rows[rowIndex]
+      const railAnchor = railAnchorForRows(row, geometry.rows[rowIndex + 1], railGap)
+      const distance = Math.abs(railAnchor + offset - eyeline)
       if (distance < bestDistance) {
         best = row
         bestDistance = distance
@@ -171,7 +193,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     }
 
     return best.startIndex
-  }, [eyelineFraction, readingLead])
+  }, [eyelineFraction, railGap])
 
   const syncAfterManual = useCallback(() => {
     const released = manualRef.current

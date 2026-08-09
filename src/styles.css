@@ -65,6 +65,7 @@ body {
 .prompter-mirror {
   position: absolute;
   inset: 0;
+  z-index: 6;
 }
 
 .prompter-lines {
