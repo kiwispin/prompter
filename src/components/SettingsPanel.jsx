@@ -135,7 +135,7 @@ export default function SettingsPanel({ settings, setSetting, resetSettings, spe
             label="Voice commands"
             checked={settings.voiceCommands}
             onChange={(v) => setSetting('voiceCommands', v)}
-            hint="Say “rewind” or “back” to jump to the top."
+            hint="Say “dinosaur” or “rewind” to jump to the top."
           />
         )}
       </Section>

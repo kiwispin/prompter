@@ -5,6 +5,15 @@ import { StreamingResampler } from '../src/lib/mic.js'
 import { buildStartRecognition, getTempKey, wordsFrom } from '../src/lib/speechmatics.js'
 import { offsetForRail, railAnchorForRows, readingRailGap } from '../src/lib/prompterGeometry.js'
 import { mirrorTransform } from '../src/lib/mirror.js'
+import { detectCommand } from '../src/lib/commands.js'
+
+test('dinosaur rewinds without treating ordinary back speech as a command', () => {
+  assert.equal(detectCommand('dinosaur'), 'rewind')
+  assert.equal(detectCommand('okay dinosaur please'), 'rewind')
+  assert.equal(detectCommand('rewind'), 'rewind')
+  assert.equal(detectCommand('back'), null)
+  assert.equal(detectCommand('go back'), null)
+})
 
 test('mirror transform applies to the complete presentation layer', () => {
   assert.equal(mirrorTransform(false, 'h'), 'none')

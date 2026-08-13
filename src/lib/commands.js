@@ -2,10 +2,10 @@
 //
 // To avoid clashing with script words, a command only fires when the ENTIRE
 // spoken utterance (minus fillers and trailing politeness like "please") is
-// exactly one of the known phrases. Reading a sentence that merely contains
-// "back" therefore never triggers it.
+// exactly one of the known phrases. The unusual "dinosaur" wake word avoids
+// accidental rewinds while reading ordinary script copy.
 
-import { tokenize } from './matcher'
+import { tokenize } from './matcher.js'
 
 const FILLERS = new Set(['um', 'uh', 'er', 'erm', 'hmm', 'mm', 'uhh', 'umm', 'ah', 'ok', 'okay', 'so', 'well', 'like', 'then'])
 const TRAILING = new Set(['please', 'thanks', 'thank', 'you'])
@@ -14,14 +14,8 @@ const COMMANDS = [
   {
     name: 'rewind',
     phrases: [
+      ['dinosaur'],
       ['rewind'],
-      ['back'],
-      ['go', 'back'],
-      ['back', 'to', 'top'],
-      ['back', 'to', 'the', 'top'],
-      ['start', 'over'],
-      ['restart'],
-      ['take', 'it', 'back'],
     ],
   },
 ]
