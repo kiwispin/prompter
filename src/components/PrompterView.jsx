@@ -375,14 +375,6 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     return () => cancelAnimationFrame(raf)
   }, [clampOffset, currentIndex, fontSize, lineHeight, matching, mode, positionRef, running, settings.baselineWpm, settings.source, syncAfterManual, targetForIndex, targetForPosition, totalWords, voiceStatus, wpm])
 
-  const mirrorStyle = useMemo(() => {
-    if (!settings.mirror) return {}
-    if (settings.mirrorAxis === 'h') return { transform: 'scaleX(-1)' }
-    if (settings.mirrorAxis === 'v') return { transform: 'scaleY(-1)' }
-    if (settings.mirrorAxis === 'both') return { transform: 'scale(-1, -1)' }
-    return {}
-  }, [settings.mirror, settings.mirrorAxis])
-
   const stageStyle = {
     '--font-size': `${fontSize}px`,
     '--line-height': lineHeight,
@@ -405,7 +397,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       onWheel={onWheel}
       style={stageStyle}
     >
-      <div className="prompter-mirror" style={mirrorStyle}>
+      <div className="prompter-mirror">
         <div className="prompter-lines" ref={linesRef} style={linesStyle}>
           {doc.lines.map((line, lineIndex) => {
             return (

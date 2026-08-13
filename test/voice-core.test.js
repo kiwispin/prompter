@@ -4,6 +4,14 @@ import { ScriptAligner, ALIGNER_STATE, similarityRatio } from '../src/lib/aligne
 import { StreamingResampler } from '../src/lib/mic.js'
 import { buildStartRecognition, getTempKey, wordsFrom } from '../src/lib/speechmatics.js'
 import { offsetForRail, railAnchorForRows, readingRailGap } from '../src/lib/prompterGeometry.js'
+import { mirrorTransform } from '../src/lib/mirror.js'
+
+test('mirror transform applies to the complete presentation layer', () => {
+  assert.equal(mirrorTransform(false, 'h'), 'none')
+  assert.equal(mirrorTransform(true, 'h'), 'scaleX(-1)')
+  assert.equal(mirrorTransform(true, 'v'), 'scaleY(-1)')
+  assert.equal(mirrorTransform(true, 'both'), 'scale(-1, -1)')
+})
 
 test('reading rail is anchored inside the measured ink gap', () => {
   const gap = readingRailGap(48)

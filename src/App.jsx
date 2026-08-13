@@ -9,6 +9,7 @@ import { useSettings } from './hooks/useSettings'
 import { useScripts } from './hooks/useScripts'
 import { usePrompter, PHASE } from './hooks/usePrompter'
 import { load, save, KEYS } from './lib/storage'
+import { mirrorTransform } from './lib/mirror'
 
 export default function App() {
   const { settings, setSetting, resetSettings, speechmaticsKey, saveSpeechmaticsKey } = useSettings()
@@ -28,6 +29,9 @@ export default function App() {
 
   const running = prompter.phase === PHASE.RUNNING
   const busy = prompter.phase === PHASE.COUNTDOWN || prompter.phase === PHASE.CONNECTING
+  const presentationStyle = {
+    transform: mirrorTransform(settings.mirror, settings.mirrorAxis),
+  }
 
   // Onboarding actions
   const dismissOnboarding = useCallback(() => {
@@ -132,49 +136,51 @@ export default function App() {
 
   return (
     <div ref={rootRef} className={`app${chromeHidden ? ' chrome-hidden' : ''}`}>
-      <PrompterView doc={prompter.doc} word={prompter.word} positionRef={prompter.positionRef} totalWords={prompter.totalWords} mode={settings.mode} settings={settings} onManualScroll={prompter.setPosition} running={running} voiceStatus={prompter.voiceStatus} wpm={prompter.stats.wpm} />
+      <div className="presentation-layer" style={presentationStyle} data-mirror-axis={settings.mirror ? settings.mirrorAxis : 'none'}>
+        <PrompterView doc={prompter.doc} word={prompter.word} positionRef={prompter.positionRef} totalWords={prompter.totalWords} mode={settings.mode} settings={settings} onManualScroll={prompter.setPosition} running={running} voiceStatus={prompter.voiceStatus} wpm={prompter.stats.wpm} />
 
-      {!chromeHidden && (
-        <>
-          <Toolbar
-            phase={prompter.phase}
-            running={running}
-            activeName={scripts.active.name}
-            onToggle={() => (running || busy ? prompter.stop() : prompter.start())}
-            onRestart={prompter.restart}
-            onOpenSettings={() => setShowSettings(true)}
-            onOpenScripts={() => setShowScripts(true)}
-            onToggleFullscreen={toggleFullscreen}
-            onToggleMirror={toggleMirror}
-            onOpenTour={() => setShowOnboarding(true)}
-            mirror={settings.mirror}
-            hasVoiceConfig={Boolean(speechmaticsKey || settings.tokenProxyUrl)}
-            onUseVoice={useMicrophone}
-            micStatus={prompter.micStatus}
-            voiceStatus={prompter.voiceStatus}
-            mode={settings.mode}
-            source={settings.source}
-          />
-          <Hud
-            stats={prompter.stats}
-            phase={prompter.phase}
-            settings={settings}
-            voiceStatus={prompter.voiceStatus}
-            lastTranscript={prompter.lastTranscript}
-            totalWords={prompter.doc.totalWords}
-            running={running}
-            hasKey={Boolean(speechmaticsKey || settings.tokenProxyUrl)}
-          />
-        </>
-      )}
+        {!chromeHidden && (
+          <>
+            <Toolbar
+              phase={prompter.phase}
+              running={running}
+              activeName={scripts.active.name}
+              onToggle={() => (running || busy ? prompter.stop() : prompter.start())}
+              onRestart={prompter.restart}
+              onOpenSettings={() => setShowSettings(true)}
+              onOpenScripts={() => setShowScripts(true)}
+              onToggleFullscreen={toggleFullscreen}
+              onToggleMirror={toggleMirror}
+              onOpenTour={() => setShowOnboarding(true)}
+              mirror={settings.mirror}
+              hasVoiceConfig={Boolean(speechmaticsKey || settings.tokenProxyUrl)}
+              onUseVoice={useMicrophone}
+              micStatus={prompter.micStatus}
+              voiceStatus={prompter.voiceStatus}
+              mode={settings.mode}
+              source={settings.source}
+            />
+            <Hud
+              stats={prompter.stats}
+              phase={prompter.phase}
+              settings={settings}
+              voiceStatus={prompter.voiceStatus}
+              lastTranscript={prompter.lastTranscript}
+              totalWords={prompter.doc.totalWords}
+              running={running}
+              hasKey={Boolean(speechmaticsKey || settings.tokenProxyUrl)}
+            />
+          </>
+        )}
 
-      {prompter.phase === PHASE.COUNTDOWN && (
-        <div className="countdown">
-          <span className="countdown-num" key={prompter.count}>
-            {prompter.count === 0 ? 'Go' : prompter.count}
-          </span>
-        </div>
-      )}
+        {prompter.phase === PHASE.COUNTDOWN && (
+          <div className="countdown">
+            <span className="countdown-num" key={prompter.count}>
+              {prompter.count === 0 ? 'Go' : prompter.count}
+            </span>
+          </div>
+        )}
+      </div>
 
       {showSettings && (
         <SettingsPanel

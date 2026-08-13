@@ -45,6 +45,12 @@ body {
   background: var(--bg);
 }
 
+.presentation-layer {
+  position: absolute;
+  inset: 0;
+  transform-origin: center;
+}
+
 /* ---------- Prompter ---------- */
 
 .prompter-stage {
