@@ -10,6 +10,36 @@
 export const RT_WS_HOST = 'global.rt.speechmatics.com'
 export const TEMP_KEY_URL = 'https://mp.speechmatics.com/v1/api_keys?type=rt'
 
+export function isTransientSessionLimitError(error) {
+  const type = String(error?.type || '').toLowerCase()
+  const reason = String(error?.reason || error?.message || '').toLowerCase()
+  if (type === 'insufficient_funds' || /insufficient funds|credit|balance|free usage/.test(reason)) return false
+  return (
+    /concurr|simultaneous|active session|session limit|too many session/.test(`${type} ${reason}`) ||
+    type === 'quota_exceeded' ||
+    /quota/.test(reason)
+  )
+}
+
+export function friendlySpeechmaticsError(error) {
+  const type = String(error?.type || '').toLowerCase()
+  const reason = String(error?.reason || error?.message || '')
+  if (isTransientSessionLimitError(error)) {
+    return 'Speech recognition is still releasing an earlier rehearsal session. Close any other Prompter tabs and try again in a few seconds.'
+  }
+  if (type === 'insufficient_funds' || /insufficient funds|credit|balance|free usage/i.test(reason)) {
+    return 'The Speechmatics account has no transcription allowance remaining. Check its usage and billing settings.'
+  }
+  return reason || 'Speechmatics error'
+}
+
+function speechmaticsError(data) {
+  const error = new Error(data?.reason || data?.type || 'Speechmatics error')
+  error.type = data?.type || ''
+  error.reason = data?.reason || ''
+  return error
+}
+
 // Get a short-lived realtime token. Prefers the token proxy (no key on the
 // device); falls back to minting directly from the raw API key.
 export async function getTempKey({ apiKey, tokenProxyUrl } = {}) {
@@ -133,6 +163,7 @@ export class SpeechmaticsClient {
     this.started = false
     this.lastSeqNo = 0
     this.closedError = null
+    this.intentionalClose = false
   }
 
   get state() {
@@ -146,6 +177,7 @@ export class SpeechmaticsClient {
   async start() {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) return
     this.closedError = null
+    this.intentionalClose = false
     this.lastSeqNo = 0
     this.onStatus('authenticating')
 
@@ -262,8 +294,8 @@ export class SpeechmaticsClient {
         this.onEndOfUtterance()
         break
       case 'Error':
-        this.onError(new Error(data.type ? `${data.type}: ${data.reason}` : 'Speechmatics error'))
-        this.closedError = new Error(data.reason || data.type)
+        this.closedError = speechmaticsError(data)
+        this.onError(this.closedError)
         break
       default:
         break
@@ -271,13 +303,14 @@ export class SpeechmaticsClient {
   }
 
   handleClose(ev) {
-    if (!this.closedError && ev.code && ev.code !== 1000) {
+    const intentional = this.intentionalClose
+    if (!intentional && !this.closedError && ev.code && ev.code !== 1000) {
       this.closedError = new Error(`Connection closed (${ev.code})`)
       this.onError(this.closedError)
     }
     this.started = false
     this.onStatus('closed')
-    this.onClosed(ev)
+    if (!intentional) this.onClosed(ev)
   }
 
   sendJson(obj) {
@@ -301,10 +334,14 @@ export class SpeechmaticsClient {
   }
 
   close() {
-    try {
-      this.ws && this.ws.close()
-    } catch {}
+    const ws = this.ws
+    this.intentionalClose = true
     this.ws = null
+    try {
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        ws.close(1000, 'Prompter session ended')
+      }
+    } catch {}
     this.started = false
     this.onStatus('closed')
   }

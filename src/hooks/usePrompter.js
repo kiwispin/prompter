@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { parseScript } from '../lib/parser'
 import { detectCommand } from '../lib/commands'
-import { SpeechmaticsClient } from '../lib/speechmatics'
+import { friendlySpeechmaticsError, isTransientSessionLimitError, SpeechmaticsClient } from '../lib/speechmatics'
 import { startMic } from '../lib/mic'
 import { calculateMeasuredWpm } from '../lib/stats'
 import { ALIGNER_STATE, ScriptAligner } from '../lib/aligner'
@@ -275,6 +275,33 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
     setVoiceStatus('off')
   }
 
+  // iPad browsers can freeze or cache a page without unmounting React. Close
+  // the realtime socket as soon as the page is no longer visible so an old
+  // rehearsal cannot occupy a Speechmatics concurrency slot.
+  useEffect(() => {
+    const releaseHiddenSession = (event) => {
+      if (document.visibilityState !== 'hidden' && event?.type === 'visibilitychange') return
+      const activePhase = [PHASE.CONNECTING, PHASE.COUNTDOWN, PHASE.RUNNING].includes(phaseRef.current)
+      if (!sessionRef.current && !activePhase) return
+      startAttemptRef.current += 1
+      clearTimers()
+      stopSession()
+      const nextPhase = positionRef.current > 0 ? PHASE.PAUSED : PHASE.IDLE
+      phaseRef.current = nextPhase
+      setPhase(nextPhase)
+    }
+
+    window.addEventListener('pagehide', releaseHiddenSession)
+    document.addEventListener('visibilitychange', releaseHiddenSession)
+    document.addEventListener('freeze', releaseHiddenSession)
+    return () => {
+      window.removeEventListener('pagehide', releaseHiddenSession)
+      document.removeEventListener('visibilitychange', releaseHiddenSession)
+      document.removeEventListener('freeze', releaseHiddenSession)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function beginRestart(withCountdown) {
     if (withCountdown) {
       runCountdown()
@@ -338,11 +365,12 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
     }
     let mic
     let client
+    let clientReady = false
     let fatalHandled = false
     const failLiveSession = (message) => {
       if (startAttemptRef.current !== attemptId || fatalHandled) return
       fatalHandled = true
-      setError(message)
+      setError(friendlySpeechmaticsError(message instanceof Error ? message : new Error(message)))
       setSttStatus('error')
       setMicStatus('error')
       voiceStatusRef.current = 'error'
@@ -355,46 +383,49 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
     }
 
     const additionalVocab = [...new Set(scriptLowerRef.current.filter((token) => token.length >= 4))].slice(0, 500)
-    client = new SpeechmaticsClient({
-      apiKey: speechmaticsKey,
-      tokenProxyUrl,
-      language: 'en',
-      model: 'enhanced',
-      additionalVocab,
-      onPartial: (t) => {
-        if (startAttemptRef.current !== attemptId) return
-        lastTranscriptAtRef.current = Date.now()
-        setLastTranscript(t)
-      },
-      onFinal: (t) => {
-        if (startAttemptRef.current !== attemptId) return
-        lastTranscriptAtRef.current = Date.now()
-        setLastTranscript(t)
-      },
-      onPartialResult: ({ words }) => applyRecognition(words, { final: false }),
-      onFinalResult: ({ words, endTimes, confidences }) => applyRecognition(words, { final: true, endTimes, confidences }),
-      onEndOfUtterance: () => {
-        if (startAttemptRef.current !== attemptId) return
-        const result = alignerRef.current.endUtterance()
-        if (result.state === ALIGNER_STATE.PAUSED) {
-          voiceStatusRef.current = 'waiting'
-          setVoiceStatus('waiting')
-        }
-      },
-      onStatus: (st) => {
-        if (startAttemptRef.current === attemptId) setSttStatus(st)
-      },
-      onError: (err) => {
-        failLiveSession(err.message || 'Speechmatics error')
-      },
-      onClosed: (event) => {
-        if ([PHASE.CONNECTING, PHASE.COUNTDOWN, PHASE.RUNNING].includes(phaseRef.current)) {
-          failLiveSession(event?.code ? `Speechmatics connection closed (${event.code}).` : 'Speechmatics connection closed.')
-        }
-      },
-    })
+    const createClient = () => {
+      let instance
+      instance = new SpeechmaticsClient({
+        apiKey: speechmaticsKey,
+        tokenProxyUrl,
+        language: 'en',
+        model: 'enhanced',
+        additionalVocab,
+        onPartial: (t) => {
+          if (startAttemptRef.current !== attemptId) return
+          lastTranscriptAtRef.current = Date.now()
+          setLastTranscript(t)
+        },
+        onFinal: (t) => {
+          if (startAttemptRef.current !== attemptId) return
+          lastTranscriptAtRef.current = Date.now()
+          setLastTranscript(t)
+        },
+        onPartialResult: ({ words }) => applyRecognition(words, { final: false }),
+        onFinalResult: ({ words, endTimes, confidences }) => applyRecognition(words, { final: true, endTimes, confidences }),
+        onEndOfUtterance: () => {
+          if (startAttemptRef.current !== attemptId) return
+          const result = alignerRef.current.endUtterance()
+          if (result.state === ALIGNER_STATE.PAUSED) {
+            voiceStatusRef.current = 'waiting'
+            setVoiceStatus('waiting')
+          }
+        },
+        onStatus: (st) => {
+          if (startAttemptRef.current === attemptId) setSttStatus(st)
+        },
+        onError: (err) => {
+          if (clientReady && sessionRef.current?.client === instance) failLiveSession(err)
+        },
+        onClosed: (event) => {
+          if (clientReady && sessionRef.current?.client === instance && [PHASE.CONNECTING, PHASE.COUNTDOWN, PHASE.RUNNING].includes(phaseRef.current)) {
+            failLiveSession(event?.code ? `Speechmatics connection closed (${event.code}).` : 'Speechmatics connection closed.')
+          }
+        },
+      })
+      return instance
+    }
 
-    let clientReady = false
     try {
       setMicStatus('connecting')
       voiceStatusRef.current = 'starting'
@@ -412,11 +443,33 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       )
       if (startAttemptRef.current !== attemptId) {
         mic.stop()
-        client.close()
+        client?.close()
         return false
       }
-      sessionRef.current = { mic, client }
-      await client.start()
+      const retryDelays = [0, 1500, 3500, 6500]
+      let lastStartError
+      for (let retry = 0; retry < retryDelays.length; retry += 1) {
+        if (retryDelays[retry]) {
+          flashNotice(`Earlier rehearsal still closing — retrying (${retry + 1}/${retryDelays.length})`)
+          await new Promise((resolve) => setTimeout(resolve, retryDelays[retry]))
+        }
+        if (startAttemptRef.current !== attemptId) {
+          mic.stop()
+          return false
+        }
+        client = createClient()
+        sessionRef.current = { mic, client }
+        try {
+          await client.start()
+          lastStartError = null
+          break
+        } catch (error) {
+          lastStartError = error
+          client.close()
+          if (!isTransientSessionLimitError(error) || retry === retryDelays.length - 1) throw error
+        }
+      }
+      if (lastStartError) throw lastStartError
       if (startAttemptRef.current !== attemptId || sessionRef.current?.client !== client) {
         mic.stop()
         client.close()
@@ -430,17 +483,17 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       setError(
         permissionBlocked
           ? 'Microphone access is blocked. Allow microphone access for this site in your browser, then press Start again.'
-          : `${err.message || 'Could not start microphone'}. Check microphone permission and try again.`,
+          : friendlySpeechmaticsError(err),
       )
       setMicStatus('error')
       voiceStatusRef.current = 'error'
       setVoiceStatus('error')
       mic && mic.stop()
-      client.close()
+      client?.close()
       sessionRef.current = null
       return false
     }
-  }, [speechmaticsKey, tokenProxyUrl, applyRecognition, settings.micDeviceId])
+  }, [speechmaticsKey, tokenProxyUrl, applyRecognition, flashNotice, settings.micDeviceId])
 
   const start = useCallback(async () => {
     if ([PHASE.CONNECTING, PHASE.COUNTDOWN, PHASE.RUNNING].includes(phaseRef.current)) return

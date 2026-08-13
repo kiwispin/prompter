@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { ScriptAligner, ALIGNER_STATE, similarityRatio } from '../src/lib/aligner.js'
 import { StreamingResampler } from '../src/lib/mic.js'
-import { buildStartRecognition, getTempKey, wordsFrom } from '../src/lib/speechmatics.js'
+import { buildStartRecognition, friendlySpeechmaticsError, getTempKey, isTransientSessionLimitError, SpeechmaticsClient, wordsFrom } from '../src/lib/speechmatics.js'
 import { offsetForRail, railAnchorForRows, readingRailGap } from '../src/lib/prompterGeometry.js'
 import { mirrorTransform } from '../src/lib/mirror.js'
 import { detectCommand } from '../src/lib/commands.js'
@@ -53,6 +53,32 @@ test('Speechmatics result parsing preserves timing and confidence', () => {
     }),
     { words: ['hello'], endTimes: [0.4], confidences: [0.92] },
   )
+})
+
+test('session concurrency quota errors retry but exhausted credit does not', () => {
+  const concurrency = Object.assign(new Error('Concurrent session quota exceeded'), { type: 'quota_exceeded' })
+  const funds = Object.assign(new Error('Insufficient funds'), { type: 'insufficient_funds' })
+  assert.equal(isTransientSessionLimitError(concurrency), true)
+  assert.equal(isTransientSessionLimitError(funds), false)
+  assert.match(friendlySpeechmaticsError(concurrency), /earlier rehearsal session/i)
+  assert.match(friendlySpeechmaticsError(funds), /no transcription allowance/i)
+})
+
+test('intentional client close does not report a failed recognition session', () => {
+  const originalWebSocket = globalThis.WebSocket
+  let closeArgs
+  let closedEvents = 0
+  globalThis.WebSocket = { CONNECTING: 0, OPEN: 1 }
+  try {
+    const client = new SpeechmaticsClient({ onClosed: () => { closedEvents += 1 } })
+    client.ws = { readyState: 1, close: (...args) => { closeArgs = args } }
+    client.close()
+    client.handleClose({ code: 1000 })
+    assert.deepEqual(closeArgs, [1000, 'Prompter session ended'])
+    assert.equal(closedEvents, 0)
+  } finally {
+    globalThis.WebSocket = originalWebSocket
+  }
 })
 
 test('manual API key is used when the configured token proxy fails', async () => {
