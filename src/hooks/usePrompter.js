@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { parseScript } from '../lib/parser'
 import { detectCommand } from '../lib/commands'
-import { friendlySpeechmaticsError, isTransientSessionLimitError, SpeechmaticsClient } from '../lib/speechmatics'
+import { friendlySpeechmaticsError, isReusableRecognitionSession, isTransientSessionLimitError, SpeechmaticsClient } from '../lib/speechmatics'
 import { startMic } from '../lib/mic'
 import { calculateMeasuredWpm } from '../lib/stats'
 import { ALIGNER_STATE, ScriptAligner } from '../lib/aligner'
@@ -54,6 +54,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
   const voiceStatusRef = useRef('off')
   const pendingMatchRef = useRef(null)
   const wakeLockRef = useRef(null)
+  const finishedSessionTimerRef = useRef(null)
 
   const flashNotice = useCallback((msg) => {
     setNoticeState(msg)
@@ -161,11 +162,23 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
 
   const handleEnd = useCallback(() => {
     if (phaseRef.current !== PHASE.RUNNING) return
-    const { autoLoop, countdownOnStart } = engine.current
+    const { autoLoop, countdownOnStart, mode, source } = engine.current
     if (autoLoop) {
       beginRestart(countdownOnStart)
     } else {
+      phaseRef.current = PHASE.ENDED
       setPhase(PHASE.ENDED)
+      // Keep one live recognition session available between repeated takes.
+      // It is reused by Start/Restart and expires if the finished screen is
+      // left idle, avoiding both concurrent-session leaks and needless usage.
+      if (mode === 'voice' && source === 'mic' && isReusableRecognitionSession(sessionRef.current)) {
+        clearFinishedSessionTimer()
+        finishedSessionTimerRef.current = setTimeout(() => {
+          if (phaseRef.current !== PHASE.ENDED) return
+          startAttemptRef.current += 1
+          stopSession()
+        }, 120000)
+      }
     }
   }, [])
 
@@ -275,6 +288,21 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
     setVoiceStatus('off')
   }
 
+  function clearFinishedSessionTimer() {
+    if (!finishedSessionTimerRef.current) return
+    clearTimeout(finishedSessionTimerRef.current)
+    finishedSessionTimerRef.current = null
+  }
+
+  useEffect(() => {
+    if (settings.mode === 'voice' && settings.source === 'mic') return
+    if (!sessionRef.current) return
+    startAttemptRef.current += 1
+    clearFinishedSessionTimer()
+    stopSession()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.mode, settings.source])
+
   // iPad browsers can freeze or cache a page without unmounting React. Close
   // the realtime socket as soon as the page is no longer visible so an old
   // rehearsal cannot occupy a Speechmatics concurrency slot.
@@ -285,6 +313,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       if (!sessionRef.current && !activePhase) return
       startAttemptRef.current += 1
       clearTimers()
+      clearFinishedSessionTimer()
       stopSession()
       const nextPhase = positionRef.current > 0 ? PHASE.PAUSED : PHASE.IDLE
       phaseRef.current = nextPhase
@@ -502,13 +531,19 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       return
     }
     setError(null)
+    clearFinishedSessionTimer()
 
     const e = engine.current
+    if (positionRef.current >= totalWords) resetPosition()
     const atStart = positionRef.current <= 0
-    const attemptId = startAttemptRef.current + 1
-    startAttemptRef.current = attemptId
+    const reuseVoiceSession = e.mode === 'voice' && e.source === 'mic' && isReusableRecognitionSession(sessionRef.current)
+    const attemptId = reuseVoiceSession ? startAttemptRef.current : startAttemptRef.current + 1
+    if (!reuseVoiceSession) startAttemptRef.current = attemptId
 
-    if (e.mode === 'voice' && e.source === 'mic') {
+    if (e.mode === 'voice' && e.source === 'mic' && !reuseVoiceSession) {
+      // A stale non-recording object must never be overwritten: close it
+      // before creating a replacement so repeated takes cannot leak slots.
+      if (sessionRef.current) stopSession()
       phaseRef.current = PHASE.CONNECTING
       setPhase(PHASE.CONNECTING)
       const ready = await startVoiceSession(attemptId)
@@ -528,11 +563,12 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       statsStartElapsedRef.current = elapsedRef.current
       setPhase(PHASE.RUNNING)
     }
-  }, [totalWords, runCountdown, startVoiceSession])
+  }, [totalWords, resetPosition, runCountdown, startVoiceSession])
 
   const stop = useCallback(() => {
     startAttemptRef.current += 1
     clearTimers()
+    clearFinishedSessionTimer()
     stopSession()
     if (positionRef.current >= engine.current.totalWords) {
       setPhase(PHASE.ENDED)
@@ -547,6 +583,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
   }, [start, stop])
 
   const restart = useCallback(() => {
+    clearFinishedSessionTimer()
     if (phaseRef.current === PHASE.CONNECTING) {
       startAttemptRef.current += 1
       stopSession()
@@ -567,6 +604,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       if (activePhase === PHASE.CONNECTING || activePhase === PHASE.COUNTDOWN || delta === 0) {
         startAttemptRef.current += 1
         clearTimers()
+        clearFinishedSessionTimer()
         stopSession()
       }
       positionRef.current = Math.max(0, Math.min(totalWords, positionRef.current + delta))
@@ -615,6 +653,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
   useEffect(() => () => {
     startAttemptRef.current += 1
     clearTimers()
+    clearFinishedSessionTimer()
     stopSession()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])

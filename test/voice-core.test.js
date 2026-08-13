@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { ScriptAligner, ALIGNER_STATE, similarityRatio } from '../src/lib/aligner.js'
 import { StreamingResampler } from '../src/lib/mic.js'
-import { buildStartRecognition, friendlySpeechmaticsError, getTempKey, isTransientSessionLimitError, SpeechmaticsClient, wordsFrom } from '../src/lib/speechmatics.js'
+import { buildStartRecognition, friendlySpeechmaticsError, getTempKey, isReusableRecognitionSession, isTransientSessionLimitError, SpeechmaticsClient, wordsFrom } from '../src/lib/speechmatics.js'
 import { offsetForRail, railAnchorForRows, readingRailGap } from '../src/lib/prompterGeometry.js'
 import { mirrorTransform } from '../src/lib/mirror.js'
 import { detectCommand } from '../src/lib/commands.js'
@@ -79,6 +79,12 @@ test('intentional client close does not report a failed recognition session', ()
   } finally {
     globalThis.WebSocket = originalWebSocket
   }
+})
+
+test('a recording session is reusable between repeated rehearsal takes', () => {
+  assert.equal(isReusableRecognitionSession({ mic: {}, client: { state: 'recording' } }), true)
+  assert.equal(isReusableRecognitionSession({ mic: {}, client: { state: 'connecting' } }), false)
+  assert.equal(isReusableRecognitionSession({ client: { state: 'recording' } }), false)
 })
 
 test('manual API key is used when the configured token proxy fails', async () => {

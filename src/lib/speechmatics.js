@@ -33,6 +33,10 @@ export function friendlySpeechmaticsError(error) {
   return reason || 'Speechmatics error'
 }
 
+export function isReusableRecognitionSession(session) {
+  return Boolean(session?.mic && session?.client?.state === 'recording')
+}
+
 function speechmaticsError(data) {
   const error = new Error(data?.reason || data?.type || 'Speechmatics error')
   error.type = data?.type || ''
