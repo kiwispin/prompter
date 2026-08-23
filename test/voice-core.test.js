@@ -6,6 +6,7 @@ import { buildStartRecognition, friendlySpeechmaticsError, getTempKey, isReusabl
 import { offsetForRail, railAnchorForRows, readingRailGap } from '../src/lib/prompterGeometry.js'
 import { mirrorTransform } from '../src/lib/mirror.js'
 import { detectCommand } from '../src/lib/commands.js'
+import { createManualScrollBias, updateManualScrollBias } from '../src/lib/manualScroll.js'
 
 test('dinosaur rewinds without treating ordinary back speech as a command', () => {
   assert.equal(detectCommand('dinosaur'), 'rewind')
@@ -33,6 +34,60 @@ test('reading rail is anchored inside the measured ink gap', () => {
   assert.equal(anchor + offset, 360)
   assert.ok(anchor > row.inkBottom)
   assert.ok(anchor + 2 < nextRow.inkTop)
+})
+
+test('manual scrolling preserves the exact released pixel position', () => {
+  const bias = createManualScrollBias(-437.5, -400, 12, 1000)
+  assert.equal(-400 + bias.value, -437.5)
+  assert.equal(updateManualScrollBias(bias, {
+    running: false,
+    continuous: false,
+    position: 30,
+    now: 5000,
+    dt: 1,
+  }), bias)
+})
+
+test('voice scrolling holds a manual position until speech advances', () => {
+  const bias = createManualScrollBias(-437.5, -400, 12, 1000)
+  const held = updateManualScrollBias(bias, {
+    running: true,
+    continuous: false,
+    position: 12,
+    now: 5000,
+    dt: 0.1,
+  })
+  const released = updateManualScrollBias(held, {
+    running: true,
+    continuous: false,
+    position: 13,
+    now: 5100,
+    dt: 0.1,
+  })
+  assert.equal(held, bias)
+  assert.ok(Math.abs(released.value) < Math.abs(bias.value))
+  assert.equal(released.releasing, true)
+})
+
+test('timed scrolling resumes smoothly after the manual-scroll grace period', () => {
+  const bias = createManualScrollBias(-437.5, -400, 12, 1000)
+  const held = updateManualScrollBias(bias, {
+    running: true,
+    continuous: true,
+    position: 12.5,
+    now: 1200,
+    dt: 0.1,
+  })
+  const released = updateManualScrollBias(held, {
+    running: true,
+    continuous: true,
+    position: 13,
+    now: 1400,
+    dt: 0.1,
+  })
+  assert.equal(held, bias)
+  assert.ok(Math.abs(released.value) < Math.abs(bias.value))
+  assert.equal(released.releasing, true)
 })
 
 test('Speechmatics start message uses the supported enhanced-model field', () => {

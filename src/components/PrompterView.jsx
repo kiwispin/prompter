@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { LINE_CUE, LINE_HEADING, LINE_TEXT } from '../lib/parser'
+import { createManualScrollBias, updateManualScrollBias } from '../lib/manualScroll'
 import { offsetForRail, railAnchorForRows, readingRailGap } from '../lib/prompterGeometry'
 
 const EYELINE_PRESETS = { top: 0.18, center: 0.5, bottom: 0.85 }
@@ -17,6 +18,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   const clickSuppressionRef = useRef(false)
   const offsetRef = useRef(null)
   const targetOffsetRef = useRef(null)
+  const manualBiasRef = useRef(null)
   const momentumRef = useRef({ v: 0, running: false })
   const previousIndexRef = useRef(-1)
   const geometryRef = useRef({ rows: [], wordToRow: new Map() })
@@ -134,6 +136,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     // resume the normal eased movement from this valid geometry.
     offsetRef.current = current >= 0 ? targetForIndex(current) : 0
     targetOffsetRef.current = offsetRef.current
+    manualBiasRef.current = null
     if (holder) holder.style.transform = `translateY(${clampOffset(offsetRef.current)}px)`
   }, [clampOffset, currentIndex, targetForIndex])
 
@@ -141,6 +144,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     let frame
     offsetRef.current = null
     targetOffsetRef.current = null
+    manualBiasRef.current = null
     previousIndexRef.current = -1
     geometryRef.current = { rows: [], wordToRow: new Map() }
     const schedule = () => {
@@ -197,20 +201,27 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
 
   const syncAfterManual = useCallback(() => {
     const released = manualRef.current
-    manualRef.current = null
-    if (released != null) {
-      offsetRef.current = released
-      targetOffsetRef.current = released
-    }
     const index = wordAtReadingLine()
+    manualRef.current = null
+
+    if (released != null) {
+      const continuous = mode === 'constant' || settings.source === 'demo'
+      const automatic = continuous ? targetForPosition(index) : targetForIndex(index)
+      offsetRef.current = released
+      targetOffsetRef.current = automatic
+      manualBiasRef.current = createManualScrollBias(released, automatic, index, performance.now())
+      previousIndexRef.current = index
+    }
+
     if (index >= 0) onManualScroll?.(index)
-  }, [onManualScroll, wordAtReadingLine])
+  }, [mode, onManualScroll, settings.source, targetForIndex, targetForPosition, wordAtReadingLine])
 
   const applyManual = useCallback(
     (value) => {
       const holder = linesRef.current
       if (!holder) return value
       const next = clampOffset(value)
+      manualBiasRef.current = null
       manualRef.current = next
       holder.style.transform = `translateY(${next}px)`
       return next
@@ -223,7 +234,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     if (!event.isPrimary) return
 
     momentumRef.current.running = false
-    const currentOffset = offsetRef.current ?? parseManual(linesRef.current)
+    const currentOffset = manualRef.current ?? offsetRef.current ?? parseManual(linesRef.current)
     dragRef.current = {
       startY: event.clientY,
       previousY: event.clientY,
@@ -278,7 +289,10 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
         momentum.v = 0
       }
       momentum.v = Math.max(-1.2, Math.min(1.2, momentum.v + (-delta * 0.5) / 240))
-      if (manualRef.current == null) manualRef.current = offsetRef.current ?? 0
+      if (manualRef.current == null) {
+        manualBiasRef.current = null
+        manualRef.current = offsetRef.current ?? parseManual(linesRef.current)
+      }
     },
     [],
   )
@@ -353,7 +367,15 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
           }
 
           if (offsetRef.current == null) offsetRef.current = targetOffsetRef.current ?? 0
-          const target = targetOffsetRef.current ?? offsetRef.current
+          manualBiasRef.current = updateManualScrollBias(manualBiasRef.current, {
+            running,
+            continuous: continuousMode,
+            position: positionRef.current,
+            now,
+            dt,
+          })
+          const automaticTarget = targetOffsetRef.current ?? offsetRef.current
+          const target = automaticTarget + (manualBiasRef.current?.value ?? 0)
           if (continuousMode) {
             // Fractional word interpolation already produces a continuous
             // target; another lag layer can let the row catch up to the rail.
