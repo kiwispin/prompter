@@ -264,6 +264,16 @@ body {
   justify-content: flex-end;
 }
 
+/* The presentation transform mirrors pixels, but browser/rig overlays remain
+   on their physical screen edge. Counter-reverse the toolbar layout so Start
+   keeps its safe right-edge position while every control remains mirrored. */
+.presentation-layer[data-mirror-axis='h'] .toolbar,
+.presentation-layer[data-mirror-axis='both'] .toolbar,
+.presentation-layer[data-mirror-axis='h'] .toolbar-actions,
+.presentation-layer[data-mirror-axis='both'] .toolbar-actions {
+  flex-direction: row-reverse;
+}
+
 .toolbar-mark {
   position: relative;
   width: 28px;
