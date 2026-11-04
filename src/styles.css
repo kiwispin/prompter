@@ -730,6 +730,10 @@ body {
 .panel-overlay {
   position: absolute;
   inset: 0;
+  /* Follow the visible area so an on-screen keyboard never covers a panel. */
+  top: var(--vv-top, 0px);
+  bottom: auto;
+  height: var(--vv-height, 100%);
   background: rgba(5, 8, 12, 0.55);
   backdrop-filter: blur(3px);
   z-index: 40;
@@ -1054,6 +1058,7 @@ body {
 .scripts-body {
   display: grid;
   grid-template-columns: 260px 1fr;
+  grid-template-rows: minmax(0, 1fr);
   gap: 20px;
   padding: 16px 20px 24px;
 }
@@ -1061,6 +1066,7 @@ body {
 @media (max-width: 720px) {
   .scripts-body {
     grid-template-columns: 1fr;
+    grid-template-rows: none;
   }
 }
 
@@ -1068,6 +1074,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
 }
 
 .scripts-actions {
@@ -1186,11 +1193,48 @@ body {
   justify-content: flex-end;
 }
 
+/* While the on-screen keyboard is up, give the script editor the room. */
+.keyboard-open .panel-header {
+  padding-top: 10px;
+  padding-bottom: 8px;
+}
+
+.keyboard-open .scripts-body {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.keyboard-open .editor-textarea {
+  min-height: 120px;
+}
+
+.keyboard-open .editor-hint {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .keyboard-open .scripts-body:has(.editor-textarea:focus) {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .keyboard-open .scripts-body:has(.editor-textarea:focus) .scripts-list {
+    display: none;
+  }
+}
+
+.keyboard-open .onboard-overlay {
+  align-items: flex-start;
+  overflow-y: auto;
+}
+
 /* ---------- Onboarding ---------- */
 
 .onboard-overlay {
   position: absolute;
   inset: 0;
+  top: var(--vv-top, 0px);
+  bottom: auto;
+  height: var(--vv-height, 100%);
   background: rgba(5, 8, 12, 0.6);
   backdrop-filter: blur(6px);
   z-index: 50;

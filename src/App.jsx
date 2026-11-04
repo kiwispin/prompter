@@ -7,6 +7,7 @@ import ScriptsPanel from './components/ScriptsPanel'
 import Onboarding from './components/Onboarding'
 import { useSettings } from './hooks/useSettings'
 import { useScripts } from './hooks/useScripts'
+import { useKeyboardInset } from './hooks/useKeyboardInset'
 import { usePrompter, PHASE } from './hooks/usePrompter'
 import { load, save, KEYS } from './lib/storage'
 import { mirrorTransform } from './lib/mirror'
@@ -14,6 +15,7 @@ import { mirrorTransform } from './lib/mirror'
 export default function App() {
   const { settings, setSetting, resetSettings, speechmaticsKey, saveSpeechmaticsKey } = useSettings()
   const scripts = useScripts()
+  useKeyboardInset()
   const prompter = usePrompter({
     raw: scripts.active.text,
     settings,
