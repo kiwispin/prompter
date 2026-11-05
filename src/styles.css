@@ -474,6 +474,48 @@ body {
   box-shadow: 0 0 0 2px rgba(239, 185, 85, 0.24);
 }
 
+/* Touch screens (iPad, phones): 44px minimum targets, and a larger Start. */
+@media (pointer: coarse) {
+  :root {
+    --toolbar-h: 64px;
+  }
+
+  .iconbtn,
+  .toolbar-btn {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    border-radius: 8px;
+  }
+
+  .toolbar-actions {
+    gap: 4px;
+  }
+
+  .toolbar-primary {
+    height: 44px;
+    min-width: 104px;
+    padding: 0 18px;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+}
+
+/* Phones: four 44px buttons plus Start is all that fits beside the mark.
+   iPhone Safari cannot fullscreen a page, so that control goes first. */
+@media (pointer: coarse) and (max-width: 540px) {
+  .toolbar-btn-fullscreen {
+    display: none;
+  }
+
+  .toolbar-primary {
+    min-width: 92px;
+    padding: 0 14px;
+  }
+}
+
 .iconbtn-danger:hover {
   background: rgba(224, 91, 91, 0.15);
   color: var(--red);

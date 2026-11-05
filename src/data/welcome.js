@@ -6,12 +6,12 @@ Read your script out loud and it scrolls with you. Pause, and it waits.
 
 [smile] [look at the camera]
 
-To follow your voice, the app listens with Speechmatics. You can paste a free key under Settings, or watch the demo reader first.
+Press Start, allow the microphone, and read this paragraph aloud. If you drift off-script, the prompter holds still until you come back to the words.
 
-A fake voice reads the script so you can see how it moves.
+Want to see it move first? Choose the Demo reader in Settings and a pretend voice will read it for you.
 
 # Headings are shown but never read.
 
 [bracketed] notes are stage cues — displayed, never counted.
 
-Start with the Demo reader, then add your key to use your own voice.`
+Tap any line to jump there, or use a clicker or foot pedal to step a sentence at a time.`

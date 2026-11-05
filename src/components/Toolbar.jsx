@@ -60,9 +60,9 @@ export default function Toolbar({
         <ToolbarButton icon="settings" label="Settings" title="Settings (,)" onClick={onOpenSettings} />
         <ToolbarButton icon="help" label="Guided tour" title="Guided tour (?)" onClick={onOpenTour} />
 
-        <button className={`toolbar-primary${engaged ? ' toolbar-primary-live' : ''}`} onClick={onToggle} title="Start/Stop (Space)">
-          <Icon name={engaged ? 'pause' : 'play'} size={14} />
-          <span>{engaged ? 'Stop' : 'Start'}</span>
+        <button className={`toolbar-primary${engaged ? ' toolbar-primary-live' : ''}`} onClick={onToggle} title="Start/Pause (Space)">
+          <Icon name={running ? 'pause' : engaged ? 'close' : 'play'} size={14} />
+          <span>{primaryLabel(phase)}</span>
         </button>
       </div>
     </header>
@@ -70,12 +70,20 @@ export default function Toolbar({
 }
 
 function getState(phase) {
-  if (phase === PHASE.CONNECTING) return { label: 'Starting', kind: 'busy' }
-  if (phase === PHASE.COUNTDOWN) return { label: 'Ready', kind: 'busy' }
+  if (phase === PHASE.CONNECTING) return { label: 'Connecting', kind: 'busy' }
+  if (phase === PHASE.COUNTDOWN) return { label: 'Countdown', kind: 'busy' }
   if (phase === PHASE.RUNNING) return { label: 'Live', kind: 'live' }
   if (phase === PHASE.PAUSED) return { label: 'Paused', kind: 'paused' }
   if (phase === PHASE.ENDED) return { label: 'Finished', kind: 'paused' }
-  return { label: 'Idle', kind: 'idle' }
+  return { label: 'Ready', kind: 'idle' }
+}
+
+// Stopping mid-script keeps the position, so the button pauses and resumes.
+function primaryLabel(phase) {
+  if (phase === PHASE.RUNNING) return 'Pause'
+  if (phase === PHASE.CONNECTING || phase === PHASE.COUNTDOWN) return 'Cancel'
+  if (phase === PHASE.PAUSED) return 'Resume'
+  return 'Start'
 }
 
 function ToolbarButton({ icon, label, title, onClick, active = false }) {

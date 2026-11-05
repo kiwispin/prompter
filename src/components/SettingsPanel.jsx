@@ -4,28 +4,6 @@ export default function SettingsPanel({ settings, setSetting, resetSettings, spe
   const proxyConfigured = Boolean(settings.tokenProxyUrl)
   return (
     <PanelShell title="Settings" onClose={onClose}>
-      <Section title="API keys">
-        <KeyRow
-          label="Speechmatics"
-          auto={proxyConfigured}
-          hint={
-            proxyConfigured
-              ? 'Automatic via token proxy — no key needed on any device. Optional manual key is used as a fallback.'
-              : 'Required for live voice tracking — the Demo reader needs no key.'
-          }
-          value={speechmaticsKey}
-          onChange={saveSpeechmaticsKey}
-          url="https://portal.speechmatics.com/api-keys"
-        />
-        <p className="panel-note">
-          {proxyConfigured
-            ? 'Tokens are minted by your Cloudflare Worker; your key never reaches this device.'
-            : 'Your key stays in this browser and is sent only to Speechmatics to mint a short-lived session token. New accounts start with free credit.'}
-        </p>
-
-        <ProxyRow value={settings.tokenProxyUrl} onChange={(v) => setSetting('tokenProxyUrl', v)} />
-      </Section>
-
       <Section title="Scrolling">
         <Segmented
           label="Mode"
@@ -108,7 +86,7 @@ export default function SettingsPanel({ settings, setSetting, resetSettings, spe
         />
       </Section>
 
-      <Section title="Matching">
+      <Section title="Highlighting">
         {settings.mode === 'constant' ? (
           <div className="panel-hint">Speed scroll glides smoothly — no word tracking or highlight.</div>
         ) : (
@@ -193,6 +171,28 @@ export default function SettingsPanel({ settings, setSetting, resetSettings, spe
         <Toggle label="Show HUD" checked={settings.showHud} onChange={(v) => setSetting('showHud', v)} />
         <Toggle label="Show stage cues" checked={settings.showCues} onChange={(v) => setSetting('showCues', v)} hint="[bracketed] direction notes." />
         <Toggle label="Countdown on start" checked={settings.countdownOnStart} onChange={(v) => setSetting('countdownOnStart', v)} hint="3-2-1 before the script begins." />
+      </Section>
+
+      <Section title="Advanced: voice service">
+        <KeyRow
+          label="Speechmatics"
+          auto={proxyConfigured}
+          hint={
+            proxyConfigured
+              ? 'Automatic via token proxy — no key needed on any device. Optional manual key is used as a fallback.'
+              : 'Required for live voice tracking — the Demo reader needs no key.'
+          }
+          value={speechmaticsKey}
+          onChange={saveSpeechmaticsKey}
+          url="https://portal.speechmatics.com/api-keys"
+        />
+        <p className="panel-note">
+          {proxyConfigured
+            ? 'Tokens are minted by your Cloudflare Worker; your key never reaches this device.'
+            : 'Your key stays in this browser and is sent only to Speechmatics to mint a short-lived session token. New accounts start with free credit.'}
+        </p>
+
+        <ProxyRow value={settings.tokenProxyUrl} onChange={(v) => setSetting('tokenProxyUrl', v)} />
       </Section>
 
       <div className="panel-footer">
