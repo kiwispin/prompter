@@ -4,6 +4,8 @@ import { createManualScrollBias, updateManualScrollBias } from '../lib/manualScr
 import { offsetForRail, railAnchorForRows, readingRailGap } from '../lib/prompterGeometry'
 
 const EYELINE_PRESETS = { top: 0.18, center: 0.5, bottom: 0.85 }
+// Maximum line length, in characters, so the reader's eyes stay near the lens.
+const COLUMN_MAX = { full: 'none', narrow: '26ch' }
 const FONT_STACK = {
   sans: "'Inter Tight', 'Arial Narrow', 'Segoe UI', sans-serif",
   mono: "'SFMono-Regular', Consolas, 'Roboto Mono', monospace",
@@ -24,6 +26,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
   const geometryRef = useRef({ rows: [], wordToRow: new Map() })
 
   const { fontSize, lineHeight, sideMargins, fontFamily, matching } = settings
+  const columnMax = COLUMN_MAX[settings.column] || COLUMN_MAX.full
   const railGap = readingRailGap(fontSize)
   const eyelineFraction = useMemo(() => {
     if (Number.isFinite(settings.eyelinePercent)) {
@@ -174,7 +177,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
       fontSet?.removeEventListener?.('loadingdone', schedule)
       observer?.disconnect()
     }
-  }, [doc, fontSize, lineHeight, sideMargins, fontFamily, mode, eyelineFraction, measureGeometry])
+  }, [doc, fontSize, lineHeight, sideMargins, columnMax, fontFamily, mode, eyelineFraction, measureGeometry])
 
   const wordAtReadingLine = useCallback(() => {
     const stage = stageRef.current
@@ -401,6 +404,7 @@ export default function PrompterView({ doc, word, positionRef, totalWords, mode,
     '--font-size': `${fontSize}px`,
     '--line-height': lineHeight,
     '--side-margin': `${sideMargins}%`,
+    '--column-max': columnMax === 'none' ? '100%' : columnMax,
     '--font': FONT_STACK[fontFamily] || FONT_STACK.sans,
   }
 

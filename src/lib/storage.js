@@ -31,4 +31,5 @@ export const KEYS = {
   activeScript: 'prompter.activeScript.v1',
   speechmaticsKey: 'prompter.smkey.v1',
   seenOnboarding: 'prompter.onboarded.v1',
+  backupReminderAt: 'prompter.backupReminder.v1',
 }

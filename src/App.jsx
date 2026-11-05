@@ -6,7 +6,7 @@ import SettingsPanel from './components/SettingsPanel'
 import ScriptsPanel from './components/ScriptsPanel'
 import Onboarding from './components/Onboarding'
 import { useSettings } from './hooks/useSettings'
-import { useScripts } from './hooks/useScripts'
+import { useScripts, needsBackup } from './hooks/useScripts'
 import { useKeyboardInset } from './hooks/useKeyboardInset'
 import { usePrompter, PHASE } from './hooks/usePrompter'
 import { load, save, KEYS } from './lib/storage'
@@ -60,6 +60,33 @@ export default function App() {
     setSetting('mirror', next)
     if (next && settings.mirrorAxis === 'none') setSetting('mirrorAxis', 'h')
   }, [setSetting, settings.mirror, settings.mirrorAxis])
+
+  // Ask the browser not to clear this site's storage (scripts live there).
+  useEffect(() => {
+    navigator.storage?.persist?.().catch(() => {})
+  }, [])
+
+  // Gentle backup reminder on open, at most every few days, when a script has
+  // gone unexported for over a day since its last edit.
+  const backupCheckedRef = useRef(false)
+  useEffect(() => {
+    if (backupCheckedRef.current || showOnboarding) return
+    backupCheckedRef.current = true
+    const DAY = 24 * 60 * 60 * 1000
+    const now = Date.now()
+    if (now - load(KEYS.backupReminderAt, 0) < 3 * DAY) return
+    const stale = scripts.scripts.some((s) => needsBackup(s) && now - (s.updatedAt || 0) > DAY)
+    if (!stale) return
+    save(KEYS.backupReminderAt, now)
+    setToast('Some scripts aren’t backed up. Open Scripts and tap Export to save a copy.')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showOnboarding])
+
+  useEffect(() => {
+    if (!toast) return undefined
+    const t = setTimeout(() => setToast(null), 9000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   // Error toast
   useEffect(() => {
@@ -231,6 +258,7 @@ export default function App() {
           deleteScript={scripts.deleteScript}
           loadScript={scripts.loadScript}
           importScript={scripts.importScript}
+          markExported={scripts.markExported}
           baselineWpm={settings.baselineWpm}
           onLoadToPrompter={() => {
             prompter.nudge(0)

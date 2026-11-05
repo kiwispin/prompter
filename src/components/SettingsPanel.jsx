@@ -122,6 +122,20 @@ export default function SettingsPanel({ settings, setSetting, resetSettings, spe
         <Slider label="Font size" value={settings.fontSize} min={24} max={96} step={1} suffix="px" onChange={(v) => setSetting('fontSize', v)} />
         <Slider label="Line height" value={settings.lineHeight} min={1.1} max={2.2} step={0.05} onChange={(v) => setSetting('lineHeight', v)} />
         <Slider label="Side margins" value={settings.sideMargins} min={0} max={40} step={1} suffix="%" onChange={(v) => setSetting('sideMargins', v)} />
+        <Segmented
+          label="Column"
+          options={[
+            { value: 'full', label: 'Full width' },
+            { value: 'narrow', label: 'Camera' },
+          ]}
+          value={settings.column || 'full'}
+          onChange={(v) => setSetting('column', v)}
+        />
+        <div className="panel-hint">
+          {settings.column === 'narrow'
+            ? 'Short lines (about 5–7 words at 44px) so eyes stay near the lens.'
+            : 'Lines run the full width between the side margins.'}
+        </div>
 
         <Segmented
           label="Font"

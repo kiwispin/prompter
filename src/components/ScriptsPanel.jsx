@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { parseScript, secondsForWords, formatDuration } from '../lib/parser'
+import { needsBackup } from '../hooks/useScripts'
 
 export default function ScriptsPanel({
   scripts,
@@ -11,6 +12,7 @@ export default function ScriptsPanel({
   deleteScript,
   loadScript,
   importScript,
+  markExported,
   baselineWpm,
   onLoadToPrompter,
   onLoadAndStart,
@@ -36,9 +38,9 @@ export default function ScriptsPanel({
     setDraft(s ? s.text : '')
   }
 
-  const finishImport = (text) => {
+  const finishImport = (text, options) => {
     if (!text.trim()) return
-    const s = importScript(text)
+    const s = importScript(text, options)
     setDraft(s.text)
     setImportText('')
     setShowImport(false)
@@ -51,7 +53,7 @@ export default function ScriptsPanel({
     if (!file) return
     const reader = new FileReader()
     reader.onload = () => {
-      finishImport(String(reader.result || ''))
+      finishImport(String(reader.result || ''), { fromFile: true })
     }
     reader.readAsText(file)
     e.target.value = ''
@@ -69,7 +71,10 @@ export default function ScriptsPanel({
     a.click()
     document.body.removeChild(a)
     setTimeout(() => URL.revokeObjectURL(url), 1000)
+    markExported(activeId)
   }
+
+  const unbacked = scripts.filter(needsBackup).length
 
   return (
     <div className="panel-overlay">
@@ -85,6 +90,12 @@ export default function ScriptsPanel({
 
         <div className="panel-body scripts-body">
           <div className="scripts-list">
+            {unbacked > 0 && (
+              <p className="backup-note">
+                {unbacked === 1 ? '1 script isn’t backed up. Pick it' : `${unbacked} scripts aren’t backed up. Pick each one`} and tap{' '}
+                <b>Export</b> to save a copy to Files.
+              </p>
+            )}
             <div className="scripts-actions">
               <button className="btn btn-primary" onClick={() => handleLoad(newScript().id)}>
                 + New
@@ -136,6 +147,7 @@ export default function ScriptsPanel({
                       <span className="script-item-name">{s.name || 'Untitled'}</span>
                       <span className="script-item-meta">
                         {d.totalWords} words · ~{formatDuration(dur)}
+                        {needsBackup(s) && <span className="script-item-backup"> · Not backed up</span>}
                       </span>
                     </button>
                     {renaming === s.id ? (

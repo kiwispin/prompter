@@ -77,8 +77,11 @@ body {
 .prompter-lines {
   position: absolute;
   top: 0;
-  left: var(--side-margin);
-  width: calc(100% - var(--side-margin) * 2);
+  /* Font set here so the column cap (in ch) matches the script's font. */
+  font-family: var(--font);
+  font-size: var(--font-size);
+  left: max(var(--side-margin), calc((100% - var(--column-max, 100%)) / 2));
+  width: min(calc(100% - var(--side-margin) * 2), var(--column-max, 100%));
   will-change: transform;
   padding-top: calc(var(--toolbar-h) + env(safe-area-inset-top) + 42px);
   padding-bottom: calc(var(--bottom-space) + var(--font-size));
@@ -96,12 +99,13 @@ body {
 
 .pline-heading {
   font-weight: 600;
-  font-size: clamp(13px, calc(var(--font-size) * 0.36), 17px);
+  /* Half the script size, so section markers stay readable at a distance. */
+  font-size: clamp(15px, calc(var(--font-size) * 0.5), 44px);
   line-height: 1.25;
-  color: #696e77;
-  letter-spacing: 0.055em;
+  color: #8a9099;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  margin: 3.1em 0 1.45em;
+  margin: 2.3em 0 1.05em;
   padding: 0;
 }
 
@@ -1179,6 +1183,30 @@ body {
 .script-item-meta {
   font-size: 11px;
   color: var(--text-dim);
+}
+
+.backup-note {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid rgba(239, 185, 85, 0.28);
+  border-radius: 10px;
+  background: var(--accent-dim);
+  color: #d9c08f;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.backup-note b {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.keyboard-open .backup-note {
+  display: none;
+}
+
+.script-item-backup {
+  color: var(--accent);
 }
 
 .script-rename {

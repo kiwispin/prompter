@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS = {
   fontSize: 44,
   lineHeight: 1.55,
   sideMargins: 10, // percent 0-40
+  column: 'full', // 'full' | 'narrow' — caps line length for camera work
   fontFamily: 'sans', // 'sans' | 'serif' | 'mono'
   mirror: false,
   mirrorAxis: 'none', // 'none' | 'h' | 'v' | 'both'

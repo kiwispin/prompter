@@ -8,6 +8,8 @@ const DEFAULT_SCRIPT = {
   text: WELCOME_SCRIPT,
 }
 
+export { needsBackup } from '../lib/backup.js'
+
 export function useScripts() {
   const [scripts, setScripts] = useState(() => {
     const stored = load(KEYS.scripts, [])
@@ -37,7 +39,7 @@ export function useScripts() {
   const newScript = useCallback(
     (name = 'Untitled script') => {
       const id = `s${Date.now().toString(36)}`
-      const script = { id, name, text: '' }
+      const script = { id, name, text: '', updatedAt: Date.now() }
       setScripts((prev) => {
         const next = [script, ...prev]
         persist(next, id)
@@ -52,7 +54,7 @@ export function useScripts() {
   const saveScript = useCallback(
     (id, text) => {
       setScripts((prev) => {
-        const next = prev.map((s) => (s.id === id ? { ...s, text } : s))
+        const next = prev.map((s) => (s.id === id ? { ...s, text, updatedAt: Date.now() } : s))
         persist(next, activeId)
         return next
       })
@@ -93,10 +95,23 @@ export function useScripts() {
     save(KEYS.activeScript, id)
   }, [])
 
-  const importScript = useCallback((text) => {
+  const markExported = useCallback(
+    (id) => {
+      setScripts((prev) => {
+        const next = prev.map((s) => (s.id === id ? { ...s, exportedAt: Date.now() } : s))
+        persist(next, activeId)
+        return next
+      })
+    },
+    [persist, activeId],
+  )
+
+  // Scripts imported from a file already have a copy on disk.
+  const importScript = useCallback((text, { fromFile = false } = {}) => {
     const id = `s${Date.now().toString(36)}`
     const name = guessName(text)
-    const script = { id, name, text }
+    const now = Date.now()
+    const script = { id, name, text, updatedAt: now, ...(fromFile ? { exportedAt: now } : {}) }
     setScripts((prev) => {
       const next = [script, ...prev]
       persist(next, id)
@@ -116,6 +131,7 @@ export function useScripts() {
     deleteScript,
     loadScript,
     importScript,
+    markExported,
   }
 }
 
