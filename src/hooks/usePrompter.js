@@ -5,6 +5,7 @@ import { friendlySpeechmaticsError, isReusableRecognitionSession, isTransientSes
 import { startMic } from '../lib/mic'
 import { calculateMeasuredWpm } from '../lib/stats'
 import { ALIGNER_STATE, ScriptAligner } from '../lib/aligner'
+import { buildSegments, sentenceStepTarget } from '../lib/navigation'
 
 export const PHASE = {
   IDLE: 'idle',
@@ -20,6 +21,9 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
   const doc = useMemo(() => parseScript(raw), [raw])
   const totalWords = doc.totalWords
   const scriptLower = useMemo(() => doc.words.map((w) => w.lower), [doc])
+  const segments = useMemo(() => buildSegments(doc), [doc])
+  const docRef = useRef(doc)
+  docRef.current = doc
 
   // Always-fresh refs so stable callbacks never read stale script data.
   const scriptLowerRef = useRef(scriptLower)
@@ -359,6 +363,22 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
         flashNotice('Rewound to the start')
         return
       }
+      if (cmd === 'back') {
+        const target = sentenceStepTarget(docRef.current, positionRef.current, -1)
+        if (target != null) {
+          clearTimers()
+          positionRef.current = target
+          wordRef.current = target
+          statsStartWordRef.current = target
+          statsStartElapsedRef.current = elapsedRef.current
+          pendingMatchRef.current = null
+          lastAdvanceAtRef.current = Date.now()
+          alignerRef.current.jumpTo(target)
+          setWord(target)
+          flashNotice('Back a sentence')
+        }
+        return
+      }
     }
     if (phaseRef.current !== PHASE.RUNNING) return
     if (!words.length) return
@@ -645,6 +665,15 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
     [totalWords, refreshStats],
   )
 
+  // Clicker keys: step to the next sentence, or back (see sentenceStepTarget).
+  const stepSentence = useCallback(
+    (direction) => {
+      const target = sentenceStepTarget(doc, Math.max(0, positionRef.current), direction)
+      if (target != null) setPosition(target)
+    },
+    [doc, setPosition],
+  )
+
   function clearTimers() {
     timersRef.current.forEach(clearInterval)
     timersRef.current = []
@@ -678,6 +707,8 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
     restart,
     nudge,
     setPosition,
+    stepSentence,
+    segments,
     clearError: () => setError(null),
     setError,
   }

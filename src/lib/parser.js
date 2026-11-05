@@ -33,6 +33,7 @@ export function parseScript(raw) {
     if (/^#{1,6}\s+/.test(trimmed)) {
       lines.push({
         type: LINE_HEADING,
+        level: trimmed.match(/^#+/)[0].length,
         text: trimmed.replace(/^#{1,6}\s+/, ''),
         words: [],
       })

@@ -12,6 +12,15 @@ const TRAILING = new Set(['please', 'thanks', 'thank', 'you'])
 
 const COMMANDS = [
   {
+    name: 'back',
+    phrases: [
+      ['back', 'a', 'sentence'],
+      ['go', 'back', 'a', 'sentence'],
+      ['back', 'one', 'sentence'],
+      ['previous', 'sentence'],
+    ],
+  },
+  {
     name: 'rewind',
     phrases: [
       ['dinosaur'],

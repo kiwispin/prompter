@@ -189,3 +189,10 @@ test('aligner tolerates close recognition errors and holds during ad-lib speech'
   assert.equal(resumed.confirmed, 4)
   assert.equal(resumed.state, ALIGNER_STATE.LIVE)
 })
+
+test('back a sentence is a whole-utterance command', () => {
+  assert.equal(detectCommand('back a sentence'), 'back')
+  assert.equal(detectCommand('um go back a sentence please'), 'back')
+  assert.equal(detectCommand('previous sentence'), 'back')
+  assert.equal(detectCommand('we went back a sentence later'), null)
+})

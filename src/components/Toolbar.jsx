@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { PHASE } from '../hooks/usePrompter'
+import { segmentAt } from '../lib/navigation'
 
 export default function Toolbar({
   phase,
@@ -17,6 +18,9 @@ export default function Toolbar({
   source,
   hasVoiceConfig,
   onUseVoice,
+  segments = [],
+  word = -1,
+  onJumpSegment,
 }) {
   const [showVoiceNudge, setShowVoiceNudge] = useState(true)
   const engaged = running || phase === PHASE.CONNECTING || phase === PHASE.COUNTDOWN
@@ -53,6 +57,7 @@ export default function Toolbar({
           {state.label}
         </span>
 
+        {segments.length > 0 && <SegmentMenu segments={segments} word={word} onJump={onJumpSegment} />}
         <ToolbarButton icon="script" label="Scripts" title="Scripts (E)" onClick={onOpenScripts} />
         <ToolbarButton icon="mirror" label="Mirror" title="Mirror (M)" onClick={onToggleMirror} active={mirror} />
         <ToolbarButton icon="restart" label="Restart" title="Restart (R)" onClick={onRestart} />
@@ -84,6 +89,62 @@ function primaryLabel(phase) {
   if (phase === PHASE.CONNECTING || phase === PHASE.COUNTDOWN) return 'Cancel'
   if (phase === PHASE.PAUSED) return 'Resume'
   return 'Start'
+}
+
+function SegmentMenu({ segments, word, onJump }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const current = segmentAt(segments, Math.max(0, word))
+
+  useEffect(() => {
+    if (!open) return undefined
+    const onDown = (event) => {
+      if (ref.current && !ref.current.contains(event.target)) setOpen(false)
+    }
+    const onKey = (event) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <span className="segment-anchor" ref={ref}>
+      <button
+        className={`iconbtn toolbar-btn toolbar-btn-segments${open ? ' toolbar-btn-active' : ''}`}
+        onClick={() => setOpen((v) => !v)}
+        title="Segments (1–9)"
+        aria-label="Segments"
+        aria-expanded={open}
+      >
+        <Icon name="list" />
+      </button>
+      {open && (
+        <div className="segment-menu" role="menu">
+          <div className="segment-menu-title">Jump to segment</div>
+          {segments.map((s) => (
+            <button
+              key={s.number}
+              role="menuitem"
+              className={`segment-item${current?.number === s.number ? ' segment-item-current' : ''}`}
+              onClick={() => {
+                onJump?.(s)
+                setOpen(false)
+              }}
+            >
+              <span className="segment-num">{s.number}</span>
+              <span className="segment-title">{s.title}</span>
+            </button>
+          ))}
+          <div className="segment-menu-hint">On a keyboard, press 1–9.</div>
+        </div>
+      )}
+    </span>
+  )
 }
 
 function ToolbarButton({ icon, label, title, onClick, active = false }) {
@@ -155,6 +216,12 @@ function Icon({ name, size = 16 }) {
       </>
     ),
     close: <path d="M18 6 6 18M6 6l12 12" />,
+    list: (
+      <>
+        <path d="M10 6h11M10 12h11M10 18h11" />
+        <path d="M4 6h1M4 12h1M4 18h1" />
+      </>
+    ),
   }
 
   return (

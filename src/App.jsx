@@ -118,10 +118,14 @@ export default function App() {
       } else if (k === 'pagedown' || k === 'arrowright') {
         // Presentation clickers and foot pedals send these: step a sentence.
         e.preventDefault()
-        stepSentence(1)
+        prompter.stepSentence(1)
       } else if (k === 'pageup' || k === 'arrowleft') {
         e.preventDefault()
-        stepSentence(-1)
+        prompter.stepSentence(-1)
+      } else if (/^[1-9]$/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        // Number keys jump to that segment: "go again from segment 3".
+        const segment = prompter.segments[Number(e.key) - 1]
+        if (segment) prompter.setPosition(segment.startIndex)
       } else if (k === 's') {
         setShowSettings((v) => !v)
       } else if (k === ',') {
@@ -145,24 +149,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showOnboarding, prompter.phase, settings.showHud, prompter])
-
-  // Move to the start of the next sentence, or back to the start of the
-  // current one (then the previous one if already at its start).
-  function stepSentence(direction) {
-    const { sentences, wordSentence, totalWords } = prompter.doc
-    if (!totalWords || !sentences.length) return
-    const index = Math.max(0, prompter.word)
-    const currentId = wordSentence.get(index) ?? 0
-    const at = sentences.findIndex((s) => s.id === currentId)
-    if (at < 0) return
-    let target
-    if (direction > 0) {
-      target = sentences[at + 1]?.startIndex
-    } else {
-      target = index > sentences[at].startIndex ? sentences[at].startIndex : sentences[at - 1]?.startIndex ?? 0
-    }
-    if (Number.isFinite(target)) prompter.setPosition(target)
-  }
 
   function toggleFullscreen() {
     const el = rootRef.current
@@ -213,6 +199,9 @@ export default function App() {
               voiceStatus={prompter.voiceStatus}
               mode={settings.mode}
               source={settings.source}
+              segments={prompter.segments}
+              word={prompter.word}
+              onJumpSegment={(segment) => prompter.setPosition(segment.startIndex)}
             />
             <Hud
               stats={prompter.stats}
