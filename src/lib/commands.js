@@ -2,8 +2,9 @@
 //
 // To avoid clashing with script words, a command only fires when the ENTIRE
 // spoken utterance (minus fillers and trailing politeness like "please") is
-// exactly one of the known phrases. The unusual "dinosaur" wake word avoids
-// accidental rewinds while reading ordinary script copy.
+// exactly one of the known phrases. The unusual "raptor" (back a sentence)
+// and "dinosaur" (back to the top) words avoid accidental jumps while reading
+// ordinary script copy.
 
 import { tokenize } from './matcher.js'
 
@@ -14,6 +15,8 @@ const COMMANDS = [
   {
     name: 'back',
     phrases: [
+      ['raptor'],
+      ['raptors'],
       ['back', 'a', 'sentence'],
       ['go', 'back', 'a', 'sentence'],
       ['back', 'one', 'sentence'],
