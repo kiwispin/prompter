@@ -46,13 +46,14 @@ export function parseScript(raw) {
     BRACKET_RE.lastIndex = 0
 
     while ((match = BRACKET_RE.exec(trimmed)) !== null) {
-      const before = trimmed.slice(cursor, match.index)
+      const before = cursor > 0 ? trimmed.slice(cursor, match.index).replace(/^\s*:/, '') : trimmed.slice(cursor, match.index)
       if (before.trim()) parts.push({ kind: 'text', text: before, words: [] })
       parts.push({ kind: 'cue', text: match[0].slice(1, -1).trim(), words: [] })
       cursor = match.index + match[0].length
     }
 
-    const after = trimmed.slice(cursor)
+    // "[Name]: line" — the colon belongs to the speaker cue, so don't show it.
+    const after = cursor > 0 ? trimmed.slice(cursor).replace(/^\s*:/, '') : trimmed.slice(cursor)
     if (after.trim()) parts.push({ kind: 'text', text: after, words: [] })
 
     const cueParts = parts.filter((part) => part.kind === 'cue')

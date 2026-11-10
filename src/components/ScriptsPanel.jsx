@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { parseScript, secondsForWords, formatDuration } from '../lib/parser'
 import { needsBackup } from '../hooks/useScripts'
+import { fetchScriptFromLink } from '../lib/remote'
 
 export default function ScriptsPanel({
   scripts,
@@ -12,6 +13,8 @@ export default function ScriptsPanel({
   deleteScript,
   loadScript,
   importScript,
+  importFromLink,
+  refreshFromLink,
   markExported,
   baselineWpm,
   onLoadToPrompter,
@@ -21,6 +24,11 @@ export default function ScriptsPanel({
   const [draft, setDraft] = useState(active.text)
   const [showImport, setShowImport] = useState(false)
   const [importText, setImportText] = useState('')
+  const [showLink, setShowLink] = useState(false)
+  const [linkText, setLinkText] = useState('')
+  const [linkBusy, setLinkBusy] = useState(false)
+  const [linkError, setLinkError] = useState('')
+  const [refreshNote, setRefreshNote] = useState('')
   const [renaming, setRenaming] = useState(null)
   const [nameDraft, setNameDraft] = useState('')
   const fileInputRef = useRef(null)
@@ -33,6 +41,7 @@ export default function ScriptsPanel({
   }
 
   const handleLoad = (id) => {
+    setRefreshNote('')
     loadScript(id)
     const s = scripts.find((x) => x.id === id)
     setDraft(s ? s.text : '')
@@ -46,6 +55,46 @@ export default function ScriptsPanel({
     setShowImport(false)
     onLoadToPrompter()
     onClose()
+  }
+
+  const handleLinkLoad = async () => {
+    if (linkBusy) return
+    setLinkBusy(true)
+    setLinkError('')
+    try {
+      const result = await fetchScriptFromLink(linkText)
+      const s = importFromLink(result)
+      setDraft(s.text)
+      setLinkText('')
+      setShowLink(false)
+      onLoadToPrompter()
+      onClose()
+    } catch (err) {
+      setLinkError(err.message || 'Couldn’t load that link.')
+    } finally {
+      setLinkBusy(false)
+    }
+  }
+
+  const handleRefresh = async () => {
+    if (linkBusy || !active.source) return
+    if ((active.updatedAt || 0) > (active.fetchedAt || 0) &&
+      !window.confirm('You’ve edited this script on this device. Replace those edits with the latest version of the doc?')) {
+      return
+    }
+    setLinkBusy(true)
+    setRefreshNote('Updating…')
+    try {
+      const result = await fetchScriptFromLink(active.source.url)
+      refreshFromLink(activeId, result)
+      setDraft(result.text)
+      onLoadToPrompter()
+      setRefreshNote(result.text === active.text ? 'Already up to date' : 'Updated from the doc')
+    } catch (err) {
+      setRefreshNote(err.message || 'Couldn’t update.')
+    } finally {
+      setLinkBusy(false)
+    }
   }
 
   const handleFileImport = (e) => {
@@ -100,8 +149,24 @@ export default function ScriptsPanel({
               <button className="btn btn-primary" onClick={() => handleLoad(newScript().id)}>
                 + New
               </button>
-              <button className="btn btn-ghost" onClick={() => setShowImport((v) => !v)}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => {
+                  setShowImport((v) => !v)
+                  setShowLink(false)
+                }}
+              >
                 Import text
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={() => {
+                  setShowLink((v) => !v)
+                  setShowImport(false)
+                  setLinkError('')
+                }}
+              >
+                Google Doc…
               </button>
               <button className="btn btn-ghost" onClick={() => fileInputRef.current && fileInputRef.current.click()}>
                 Import file…
@@ -137,6 +202,42 @@ export default function ScriptsPanel({
               </div>
             )}
 
+            {showLink && (
+              <form
+                className="import-box"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  handleLinkLoad()
+                }}
+              >
+                <input
+                  className="input"
+                  type="url"
+                  inputMode="url"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck="false"
+                  placeholder="Paste a Google Doc link…"
+                  value={linkText}
+                  onChange={(e) => {
+                    setLinkText(e.target.value)
+                    setLinkError('')
+                  }}
+                  autoFocus
+                />
+                {linkError ? (
+                  <p className="link-error" role="alert">{linkError}</p>
+                ) : (
+                  <p className="link-hint">
+                    In the doc, tap Share and set access to “Anyone with the link”. Headings become segments.
+                  </p>
+                )}
+                <button className="btn btn-primary" type="submit" disabled={!linkText.trim() || linkBusy}>
+                  {linkBusy ? 'Loading…' : 'Load script'}
+                </button>
+              </form>
+            )}
+
             <ul className="script-list">
               {scripts.map((s) => {
                 const d = parseScript(s.text)
@@ -147,6 +248,7 @@ export default function ScriptsPanel({
                       <span className="script-item-name">{s.name || 'Untitled'}</span>
                       <span className="script-item-meta">
                         {d.totalWords} words · ~{formatDuration(dur)}
+                        {s.source && ' · Google Doc'}
                         {needsBackup(s) && <span className="script-item-backup"> · Not backed up</span>}
                       </span>
                     </button>
@@ -212,6 +314,19 @@ export default function ScriptsPanel({
               spellCheck="true"
             />
             <div className="editor-actions">
+              {active.source && (
+                <>
+                  <span className="refresh-note" role="status">{refreshNote}</span>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={handleRefresh}
+                    disabled={linkBusy}
+                    title="Load the latest version of the Google Doc"
+                  >
+                    Update from doc
+                  </button>
+                </>
+              )}
               <button className="btn btn-ghost" onClick={handleExport} title="Download this script as a .txt file">
                 Export…
               </button>

@@ -121,8 +121,45 @@ export function useScripts() {
     return script
   }, [persist])
 
+  // A script loaded from a link keeps its source so it can be refreshed. The
+  // doc itself is the backup, so it counts as backed up when fetched.
+  const importFromLink = useCallback(({ text, title, source }) => {
+    const id = `s${Date.now().toString(36)}`
+    const now = Date.now()
+    const script = {
+      id,
+      name: (title || guessName(text)).slice(0, 60),
+      text,
+      source,
+      updatedAt: now,
+      fetchedAt: now,
+      exportedAt: now,
+    }
+    setScripts((prev) => {
+      const next = [script, ...prev]
+      persist(next, id)
+      return next
+    })
+    setActiveId(id)
+    return script
+  }, [persist])
+
+  const refreshFromLink = useCallback(
+    (id, { text }) => {
+      const now = Date.now()
+      setScripts((prev) => {
+        const next = prev.map((s) => (s.id === id ? { ...s, text, updatedAt: now, fetchedAt: now, exportedAt: now } : s))
+        persist(next, activeId)
+        return next
+      })
+    },
+    [persist, activeId],
+  )
+
   return {
     scripts,
+    importFromLink,
+    refreshFromLink,
     activeId,
     active,
     newScript,

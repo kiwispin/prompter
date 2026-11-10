@@ -247,6 +247,8 @@ export default function App() {
           deleteScript={scripts.deleteScript}
           loadScript={scripts.loadScript}
           importScript={scripts.importScript}
+          importFromLink={scripts.importFromLink}
+          refreshFromLink={scripts.refreshFromLink}
           markExported={scripts.markExported}
           baselineWpm={settings.baselineWpm}
           onLoadToPrompter={() => {
