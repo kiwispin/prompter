@@ -5,7 +5,8 @@ import { friendlySpeechmaticsError, isReusableRecognitionSession, isTransientSes
 import { startMic } from '../lib/mic'
 import { calculateMeasuredWpm } from '../lib/stats'
 import { ALIGNER_STATE, ScriptAligner } from '../lib/aligner'
-import { buildSegments, sentenceStepTarget } from '../lib/navigation'
+import { buildSegments, findOpening, findRunStart, sentenceStepTarget } from '../lib/navigation'
+import { tokenize } from '../lib/text'
 
 export const PHASE = {
   IDLE: 'idle',
@@ -15,6 +16,12 @@ export const PHASE = {
   PAUSED: 'paused',
   ENDED: 'ended',
 }
+
+// A live mic session left waiting between takes closes after this long:
+// longer after a take ends (time for a chat before "dinosaur"), shorter once
+// a jump has armed following and nobody has started reading.
+const ENDED_RELEASE_MS = 5 * 60 * 1000
+const ARMED_RELEASE_MS = 2 * 60 * 1000
 
 export function usePrompter({ raw, settings, speechmaticsKey }) {
   const tokenProxyUrl = settings.tokenProxyUrl
@@ -59,6 +66,12 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
   const pendingMatchRef = useRef(null)
   const wakeLockRef = useRef(null)
   const finishedSessionTimerRef = useRef(null)
+  // True while following is armed but nobody has spoken yet: the clock and
+  // WPM wait for the first matched word.
+  const holdClockRef = useRef(false)
+  const armedAtRef = useRef(0)
+  // Recent words heard while finished or waiting to go again.
+  const heardRef = useRef([])
 
   const flashNotice = useCallback((msg) => {
     setNoticeState(msg)
@@ -81,6 +94,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       countdownOnStart: settings.countdownOnStart,
     }
     phaseRef.current = phase
+    if (phase !== PHASE.RUNNING) holdClockRef.current = false
   }, [phase, settings, totalWords])
 
   // Reset when the script changes.
@@ -173,15 +187,12 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       phaseRef.current = PHASE.ENDED
       setPhase(PHASE.ENDED)
       // Keep one live recognition session available between repeated takes.
-      // It is reused by Start/Restart and expires if the finished screen is
-      // left idle, avoiding both concurrent-session leaks and needless usage.
+      // Saying the opening words, "dinosaur", Restart or tapping a line picks
+      // it straight back up; it expires if the finished screen is left idle,
+      // avoiding both concurrent-session leaks and needless usage.
       if (mode === 'voice' && source === 'mic' && isReusableRecognitionSession(sessionRef.current)) {
-        clearFinishedSessionTimer()
-        finishedSessionTimerRef.current = setTimeout(() => {
-          if (phaseRef.current !== PHASE.ENDED) return
-          startAttemptRef.current += 1
-          stopSession()
-        }, 120000)
+        heardRef.current = []
+        scheduleIdleRelease(ENDED_RELEASE_MS)
       }
     }
   }, [])
@@ -197,7 +208,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       const e = engine.current
 
       if (e.phase === PHASE.RUNNING) {
-        elapsedRef.current += dt
+        if (!holdClockRef.current) elapsedRef.current += dt
         const auto = e.mode === 'constant' || (e.mode === 'voice' && e.source === 'demo')
         if (auto && e.baselineWpm > 0) {
           positionRef.current += (e.baselineWpm / 60) * dt
@@ -225,6 +236,8 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
   useEffect(() => {
     if (phase === PHASE.RUNNING || phase === PHASE.COUNTDOWN || phase === PHASE.CONNECTING) {
       const id = setInterval(() => {
+        // A timer may have just closed the session; don't revive its status.
+        if (![PHASE.RUNNING, PHASE.COUNTDOWN, PHASE.CONNECTING].includes(phaseRef.current)) return
         refreshStats()
         const now = Date.now()
         let vs = 'off'
@@ -298,6 +311,55 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
     finishedSessionTimerRef.current = null
   }
 
+  // Close a live session nobody is using: after the end of a take, or when
+  // following was armed by a jump but nobody started reading.
+  function scheduleIdleRelease(ms = ARMED_RELEASE_MS) {
+    clearFinishedSessionTimer()
+    finishedSessionTimerRef.current = setTimeout(() => {
+      finishedSessionTimerRef.current = null
+      const idle = phaseRef.current === PHASE.ENDED || (phaseRef.current === PHASE.RUNNING && holdClockRef.current)
+      if (!idle) return
+      startAttemptRef.current += 1
+      holdClockRef.current = false
+      stopSession()
+      const next = positionRef.current >= engine.current.totalWords ? PHASE.ENDED : positionRef.current > 0 ? PHASE.PAUSED : PHASE.IDLE
+      phaseRef.current = next
+      setPhase(next)
+    }, ms)
+  }
+
+  // While the mic is still live (between takes), any jump means "go from
+  // here": keep following, but hold the clock until the first word lands.
+  // Without a live session (paused, constant or demo mode) nothing changes.
+  function armFollowing({ fresh = false } = {}) {
+    const e = engine.current
+    if (e.mode !== 'voice' || e.source !== 'mic' || !isReusableRecognitionSession(sessionRef.current)) return false
+    // A countdown in progress has already been cancelled by the jump.
+    if (phaseRef.current === PHASE.CONNECTING) return false
+    if (phaseRef.current === PHASE.RUNNING && !fresh) return true
+    setCount(0)
+    holdClockRef.current = true
+    armedAtRef.current = Math.max(0, Math.floor(positionRef.current))
+    heardRef.current = []
+    phaseRef.current = PHASE.RUNNING
+    setPhase(PHASE.RUNNING)
+    scheduleIdleRelease()
+    return true
+  }
+
+  function jumpToTop() {
+    clearTimers()
+    positionRef.current = 0
+    wordRef.current = -1
+    elapsedRef.current = 0
+    statsStartWordRef.current = 0
+    statsStartElapsedRef.current = 0
+    pendingMatchRef.current = null
+    lastAdvanceAtRef.current = Date.now()
+    alignerRef.current.jumpTo(0)
+    setWord(-1)
+  }
+
   useEffect(() => {
     if (settings.mode === 'voice' && settings.source === 'mic') return
     if (!sessionRef.current) return
@@ -349,17 +411,8 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
     if (engine.current.voiceCommands !== false) {
       const cmd = final ? detectCommand(transcript) : null
       if (cmd === 'rewind') {
-        clearTimers()
-        positionRef.current = 0
-        wordRef.current = -1
-        elapsedRef.current = 0
-        statsStartWordRef.current = 0
-        statsStartElapsedRef.current = 0
-        pendingMatchRef.current = null
-        lastAdvanceAtRef.current = Date.now()
-        alignerRef.current.jumpTo(0)
-        setWord(-1)
-        if (phaseRef.current !== PHASE.RUNNING) setPhase(PHASE.IDLE)
+        jumpToTop()
+        if (!armFollowing({ fresh: true }) && phaseRef.current !== PHASE.RUNNING) setPhase(PHASE.IDLE)
         flashNotice('Rewound to the start')
         return
       }
@@ -375,13 +428,55 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
           lastAdvanceAtRef.current = Date.now()
           alignerRef.current.jumpTo(target)
           setWord(target)
+          armFollowing()
           flashNotice('Back a sentence')
         }
         return
       }
     }
+    // Finished, but the talent has started the script again: go with them.
+    // heardRef holds recent final words; the current chunk may be a partial.
+    if (phaseRef.current === PHASE.ENDED && words.length && isReusableRecognitionSession(sessionRef.current)) {
+      const fresh = words.flatMap((w) => tokenize(w))
+      const heard = [...heardRef.current, ...fresh]
+      const earlier = heardRef.current.length
+      if (final) heardRef.current = heard.slice(-12)
+      const at = findOpening(heard, scriptLowerRef.current)
+      if (at < 0) return
+      jumpToTop()
+      if (!armFollowing({ fresh: true })) return
+      // Opening words that arrived in an earlier chunk still count.
+      heardRef.current = heard.slice(Math.min(at, earlier), earlier)
+      flashNotice('Going again from the top')
+    }
     if (phaseRef.current !== PHASE.RUNNING) return
     if (!words.length) return
+    // Waiting to go again: only start once a run of script words is heard,
+    // then follow from the start of that run. Room chatter is ignored.
+    if (holdClockRef.current) {
+      const fresh = words.flatMap((w) => tokenize(w))
+      const heard = [...heardRef.current, ...fresh]
+      const earlier = heardRef.current.length
+      if (final) heardRef.current = heard.slice(-12)
+      const at = findRunStart(heard, scriptLowerRef.current, armedAtRef.current)
+      if (at < 0) return
+      holdClockRef.current = false
+      heardRef.current = []
+      clearFinishedSessionTimer()
+      statsStartWordRef.current = armedAtRef.current
+      statsStartElapsedRef.current = elapsedRef.current
+      const aligner = alignerRef.current
+      aligner.jumpTo(armedAtRef.current)
+      // Earlier final chunks are settled; the current chunk keeps its own
+      // final/partial status so a later final can still correct a partial.
+      if (at < earlier) aligner.feedFinal(heard.slice(at, earlier))
+      const current = fresh.slice(Math.max(0, at - earlier))
+      const started = final ? aligner.feedFinal(current) : aligner.feedPartial(current)
+      positionRef.current = started.provisional
+      lastAdvanceAtRef.current = Date.now()
+      syncWord()
+      return
+    }
     const result = final
       ? alignerRef.current.feedFinal(words, endTimes, confidences)
       : alignerRef.current.feedPartial(words)
@@ -391,6 +486,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       lastAdvanceAtRef.current = Date.now()
       syncWord()
     }
+
     const nextVoiceStatus =
       result.state === ALIGNER_STATE.OFFSCRIPT
         ? 'offscript'
@@ -614,7 +710,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
       beginRestart(true)
     } else {
       resetPosition()
-      setPhase(PHASE.IDLE)
+      if (!armFollowing({ fresh: true })) setPhase(PHASE.IDLE)
     }
   }, [resetPosition])
 
@@ -660,6 +756,7 @@ export function usePrompter({ raw, settings, speechmaticsKey }) {
         setPhase(PHASE.IDLE)
       }
       setWord(i)
+      armFollowing()
       refreshStats()
     },
     [totalWords, refreshStats],

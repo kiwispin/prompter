@@ -40,3 +40,23 @@ test('stepping back repeats the current sentence, or the previous one near its s
   assert.equal(sentenceStepTarget(doc, 0, -1), 0)
   assert.equal(sentenceStepTarget(doc, 1, 1), 4)
 })
+
+test('going again is spotted from the script’s opening words', async () => {
+  const { findOpening } = await import('../src/lib/navigation.js')
+  const script = ['welcome', 'to', 'the', 'week', 'that', 'was']
+  assert.equal(findOpening(['okay', 'welcome', 'to', 'the', 'week'], script), 1)
+  assert.equal(findOpening(['welcome', 'to', 'the'], script), -1)
+  assert.equal(findOpening(['thanks', 'everyone', 'see', 'you', 'next', 'week'], script), -1)
+  assert.equal(findOpening(['hi', 'there'], ['hi', 'there']), -1)
+})
+
+test('a take only starts on a run of script words, not stray chatter', async () => {
+  const { findRunStart } = await import('../src/lib/navigation.js')
+  const script = ['good', 'morning', 'and', 'welcome', 'to', 'the', 'show', 'this', 'is']
+  assert.equal(findRunStart(['and'], script, 0), -1)
+  assert.equal(findRunStart(['okay', 'and', 'quiet', 'please'], script, 0), -1)
+  assert.equal(findRunStart(['good', 'morning', 'and'], script, 0), 0)
+  assert.equal(findRunStart(['could', 'morning', 'and', 'welcome'], script, 0), 1) // misheard first word
+  assert.equal(findRunStart(['this', 'is'], script, 7), 0) // fewer words left than a run
+  assert.equal(findRunStart(['the', 'show', 'this'], script, 0), -1) // too far ahead of the start
+})

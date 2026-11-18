@@ -47,3 +47,42 @@ export function segmentAt(segments, index) {
   for (const s of segments) if (index >= s.startIndex) found = s
   return found
 }
+
+// After the end of a take, hearing the script's opening words means the talent
+// is going again. Needs at least three opening words so a short script can't
+// restart on a stray "hello".
+export const OPENING_WORDS = 4
+
+// Returns where the opening starts in the heard words, or -1.
+export function findOpening(heard, scriptWords, count = OPENING_WORDS) {
+  const opening = scriptWords.slice(0, count)
+  if (opening.length < 3 || heard.length < opening.length) return -1
+  for (let i = 0; i + opening.length <= heard.length; i++) {
+    if (opening.every((w, j) => heard[i + j] === w)) return i
+  }
+  return -1
+}
+
+// While waiting to go again, a take only starts once the talent has said a
+// short run of script words in a row from where it is waiting, so a stray
+// "and" from the room can't start it. Any run within the first few words
+// counts, so a misheard first word still gets going. Returns where the run
+// starts in the heard words, or -1.
+export function findRunStart(heard, scriptWords, from, run = 3, window = 6) {
+  const need = Math.min(run, scriptWords.length - from)
+  if (need <= 0) return -1
+  const lastStart = Math.min(from + window - need, scriptWords.length - need)
+  for (let s = from; s <= lastStart; s++) {
+    for (let i = 0; i + need <= heard.length; i++) {
+      let ok = true
+      for (let j = 0; j < need; j++) {
+        if (heard[i + j] !== scriptWords[s + j]) {
+          ok = false
+          break
+        }
+      }
+      if (ok) return i
+    }
+  }
+  return -1
+}
